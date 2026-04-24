@@ -57,6 +57,47 @@ html, body {
   50%      { opacity:0; }
 }
 
+/* ── Theme overrides ──────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg:     #F4F4FC;
+  --bg2:    #ECECF6;
+  --bg3:    #E4E4EE;
+  --border: #CACAD8;
+  --text:   #1A1A2A;
+  --text2:  #44445A;
+  --blue:   #2255CC;
+  --green:  #117744;
+  --yellow: #886600;
+  --orange: #AA5500;
+  --purple: #7722AA;
+  --red:    #AA2200;
+  --cyan:   #006688;
+}
+
+[data-theme="blueprint"] {
+  --bg:     #0D1B2A;
+  --bg2:    #0A1628;
+  --bg3:    #071020;
+  --border: #1A3A5A;
+  --text:   #C8DEFF;
+  --text2:  #7AADDD;
+  --blue:   #5599FF;
+  --green:  #44DDAA;
+  --yellow: #EEDD55;
+  --orange: #FFBB44;
+  --purple: #AA77FF;
+  --red:    #FF6655;
+  --cyan:   #44CCEE;
+}
+
+/* Blueprint drafting-paper grid shown in SVG viewer */
+[data-theme="blueprint"] .svg-viewer-bg {
+  background-image:
+    linear-gradient(rgba(68,136,255,0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(68,136,255,0.07) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
 input:focus, select:focus { outline:none; }
 
 button { font-family:inherit; }

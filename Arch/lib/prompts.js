@@ -287,6 +287,25 @@ Rules:
 Keep all items strictly inside room boundaries with at least 8px margin from walls.`;
 }
 
+export function buildExplainToParentsPrompt(report, language) {
+  const langMap = { Hindi:'हिंदी', Kannada:'ಕನ್ನಡ', Tamil:'தமிழ்' };
+  const script = langMap[language] || language;
+  return `Explain this Vastu report in simple, warm language suitable for elderly Indian parents who don't know architectural terms.
+
+Vastu Score: ${report?.score}/100
+Summary: "${report?.summary}"
+Main Issues: ${report?.violations?.map(v => v.rule).join(', ') || 'None'}
+Rules followed: ${report?.compliant?.length || 0} of 14
+
+Write ONLY in this exact format — no extra text, no markdown:
+
+ENGLISH:
+[2-3 simple, reassuring sentences. Say whether the home energy is good overall. Mention the main issue if any. End with a positive note. No jargon.]
+
+${language} (${script}):
+[Translate the English sentences exactly into ${language}. Keep a warm, respectful tone. Use "ji" where natural.]`;
+}
+
 export function buildChatAnalysisPrompt(params, userMsg) {
   return `You are an architectural AI assistant. The user has a ${params.bhk}BHK floor plan on a ${params.plotW}×${params.plotH}ft ${params.facing}-facing plot in ${params.city}.
 

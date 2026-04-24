@@ -131,6 +131,27 @@ export default function LandingPage() {
       title: "Cost & BOM Estimation",
       desc: "Region-specific construction cost breakdown, bill of materials, and project timeline for every design.",
     },
+    {
+      icon: "🏛",
+      color: "#44DD88",
+      title: "Presets Library",
+      desc: "20+ ready Vastu plans",
+      href: "/presets",
+    },
+    {
+      icon: "📖",
+      color: "#FFAA22",
+      title: "Vastu Glossary",
+      desc: "32 terms explained",
+      href: "/glossary",
+    },
+    {
+      icon: "✏️",
+      color: "#CC66FF",
+      title: "Canvas Check",
+      desc: "Draw & validate your plan",
+      href: "/canvas",
+    },
   ];
 
   return (
@@ -142,6 +163,36 @@ export default function LandingPage() {
       overflow: "hidden",
       position: "relative",
     }}>
+      {/* Nav */}
+      <nav style={{
+        position:'sticky', top:0, zIndex:100,
+        display:'flex', alignItems:'center', gap:16,
+        padding:'12px 32px',
+        background:'rgba(8,8,20,0.92)', backdropFilter:'blur(12px)',
+        borderBottom:'1px solid #1A1A28',
+        flexWrap:'wrap',
+      }}>
+        <span style={{ fontSize:16, fontWeight:700, color:'#F0E040', fontFamily:'Georgia,serif', marginRight:8 }}>
+          वास्तु AI
+        </span>
+        {[
+          { href:'/app',      label:'Studio',       color:'#4488FF' },
+          { href:'/presets',  label:'Presets',      color:'#44DD88' },
+          { href:'/glossary', label:'Glossary',     color:'#FFAA22' },
+          { href:'/canvas',   label:'Canvas Check', color:'#CC66FF' },
+        ].map(link => (
+          <a key={link.href} href={link.href} style={{
+            color: link.color, fontSize:11, fontWeight:600,
+            textDecoration:'none', fontFamily:'monospace',
+            letterSpacing:'0.05em', opacity:0.85,
+            transition:'opacity 0.15s',
+          }}
+          onMouseEnter={e => e.target.style.opacity='1'}
+          onMouseLeave={e => e.target.style.opacity='0.85'}
+          >{link.label}</a>
+        ))}
+      </nav>
+
       {/* Google Font */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap');
@@ -375,13 +426,24 @@ export default function LandingPage() {
           marginTop: 72,
           animation: "fadeUp 0.7s ease 0.5s both",
         }}>
-          {features.map((f) => (
-            <div key={f.title} className="feature-card">
-              <div style={{ fontSize: 28, marginBottom: 10, color: f.color }}>{f.icon}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#D8D8EC", marginBottom: 7 }}>{f.title}</div>
-              <div style={{ fontSize: 12, color: "#4A4A6A", lineHeight: 1.6 }}>{f.desc}</div>
-            </div>
-          ))}
+          {features.map((f) => {
+            const cardContent = (
+              <>
+                <div style={{ fontSize: 28, marginBottom: 10, color: f.color }}>{f.icon}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#D8D8EC", marginBottom: 7 }}>{f.title}</div>
+                <div style={{ fontSize: 12, color: "#4A4A6A", lineHeight: 1.6 }}>{f.desc}</div>
+              </>
+            );
+            return f.href ? (
+              <a key={f.title} href={f.href} className="feature-card" style={{ textDecoration: "none", display: "block" }}>
+                {cardContent}
+              </a>
+            ) : (
+              <div key={f.title} className="feature-card">
+                {cardContent}
+              </div>
+            );
+          })}
         </div>
 
         {/* ── AI Fallback chain visual ──────────────────────────────────────── */}
