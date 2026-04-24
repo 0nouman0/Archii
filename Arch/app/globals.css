@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:     #080814;
+  --bg2:    #0A0A16;
+  --bg3:    #0E0E1C;
+  --border: #1A1A2A;
+  --text:   #D8D8EC;
+  --text2:  #888899;
+  --blue:   #4488FF;
+  --green:  #44DD88;
+  --yellow: #F0E040;
+  --orange: #FFAA22;
+  --purple: #CC66FF;
+  --red:    #FF5544;
+  --cyan:   #22CCCC;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #222234; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #2A2A44; }
+
+@keyframes agentPulse {
+  0%,100% { opacity:1; transform:scale(1); }
+  50%      { opacity:0.4; transform:scale(0.85); }
+}
+@keyframes agentBlink {
+  0%,100% { opacity:1; transform:scale(1); }
+  50%      { opacity:0.2; transform:scale(0.6); }
+}
+@keyframes fadeInUp {
+  from { opacity:0; transform:translateY(6px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity:0; }
+  to   { opacity:1; }
+}
+@keyframes spin {
+  from { transform:rotate(0deg); }
+  to   { transform:rotate(360deg); }
+}
+@keyframes blink {
+  0%,100% { opacity:1; }
+  50%      { opacity:0; }
+}
+
+input:focus, select:focus { outline:none; }
+
+button { font-family:inherit; }
+button:disabled { cursor:not-allowed; opacity:0.38; }
+button:not(:disabled):active { transform:scale(0.97); }
+
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23444455'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px !important;
+}
