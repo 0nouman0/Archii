@@ -22,7 +22,7 @@ import {
 } from "../../lib/prompts";
 import { supabase } from "../../lib/supabase";
 
-// ─── API helper (no apiKey — server handles it) ───────────────────────────────
+// ─── API helpers ──────────────────────────────────────────────────────────────
 async function claude(sys, user, maxTokens = 4000) {
   const res = await fetch("/api/claude", {
     method: "POST",
@@ -31,9 +31,78 @@ async function claude(sys, user, maxTokens = 4000) {
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
-  // Log which provider worked
   console.log(`[AI] Response from: ${data.provider}`);
   return data.text || "";
+}
+
+// Streaming SVG — falls back to regular claude() if stream endpoint unavailable
+async function claudeStream(sys, user, maxTokens, onChunk) {
+  try {
+    const res = await fetch("/api/claude-stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ systemPrompt: sys, userPrompt: user, maxTokens }),
+    });
+    if (!res.ok) throw new Error(`stream ${res.status}`);
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let text = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += dec.decode(value, { stream: true });
+      onChunk(text);
+    }
+    return text;
+  } catch {
+    // Fallback to non-streaming
+    const text = await claude(sys, user, maxTokens);
+    onChunk(text);
+    return text;
+  }
+}
+
+// ─── SVG post-processing ───────────────────────────────────────────────────────
+function injectAnnotations(svgCode, rooms, plotW, plotH) {
+  if (!svgCode || !rooms?.length) return svgCode;
+  const vbMatch = svgCode.match(/viewBox=["']\s*[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)/i);
+  if (!vbMatch) return svgCode;
+  const svgW = parseFloat(vbMatch[1]);
+  const svgH = parseFloat(vbMatch[2]);
+  const scaleX = svgW / (plotW * 10); // layout uses 10px/ft
+  const scaleY = svgH / (plotH * 10);
+  const fs = Math.max(6, Math.min(11, svgW / 60));
+
+  const dimLabels = rooms
+    .filter(r => r.w > 0 && r.h > 0)
+    .map(r => {
+      const cx = (r.x + r.w / 2) * scaleX;
+      const cy = (r.y + r.h / 2) * scaleY + fs + 2;
+      return `<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle" font-size="${fs}" fill="#FFCC44" font-family="monospace" opacity="0.85" font-weight="600">${r.ftW}×${r.ftH}ft</text>`;
+    }).join("");
+
+  // North arrow (top-right)
+  const ax = svgW - 28, ay = 28;
+  const northArrow = `<g class="north-arrow">
+    <circle cx="${ax}" cy="${ay}" r="18" fill="#00000066" stroke="#4488FF44" stroke-width="1"/>
+    <polygon points="${ax},${ay-14} ${ax+5},${ay+6} ${ax},${ay+2} ${ax-5},${ay+6}" fill="#4488FF"/>
+    <polygon points="${ax},${ay-14} ${ax-5},${ay+6} ${ax},${ay+2} ${ax+5},${ay+6}" fill="#4488FF55"/>
+    <text x="${ax}" y="${ay+16}" text-anchor="middle" font-size="8" fill="#4488FF" font-family="monospace" font-weight="700">N</text>
+  </g>`;
+
+  // Scale bar (bottom-left, 5ft increments)
+  const bFt = Math.max(5, Math.round(plotW / 6 / 5) * 5);
+  const bPx = bFt * (svgW / plotW);
+  const bx = 16, by = svgH - 12;
+  const scaleBar = `<g class="scale-bar">
+    <rect x="${bx-2}" y="${by-10}" width="${bPx+4}" height="14" fill="#00000055" rx="2"/>
+    <line x1="${bx}" y1="${by}" x2="${bx+bPx}" y2="${by}" stroke="#AAA" stroke-width="1.5"/>
+    <line x1="${bx}" y1="${by-4}" x2="${bx}" y2="${by+2}" stroke="#AAA" stroke-width="1.5"/>
+    <line x1="${bx+bPx}" y1="${by-4}" x2="${bx+bPx}" y2="${by+2}" stroke="#AAA" stroke-width="1.5"/>
+    <text x="${bx+bPx/2}" y="${by-5}" text-anchor="middle" font-size="7" fill="#AAA" font-family="monospace">${bFt} ft</text>
+  </g>`;
+
+  return svgCode.replace(/<\/svg>/i, `<g class="annotations">${dimLabels}</g>${northArrow}${scaleBar}</svg>`);
 }
 
 function parseJSON(raw) {
@@ -200,6 +269,17 @@ export default function App() {
   const [parentExplanation, setParentExplanation] = useState(null);
   const [loadingExplanation, setLoadingExplanation] = useState(false);
 
+  // ── Mobile layout ──────────────────────────────────────────────────────────
+  const [isMobile, setIsMobile]           = useState(false);
+  const [mobileDrawer, setMobileDrawer]   = useState(null); // null | 'left' | 'right'
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 900);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
   const addLog = (msg) => setLog(l => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...l.slice(0, 79)]);
 
   // Apply theme to <html> so CSS var overrides propagate everywhere
@@ -321,18 +401,30 @@ export default function App() {
       setAgentScores(s => ({ ...s, spatial: vastuLayoutScore.score }));
       setScores(sc => ({ ...sc, vastu: vastuLayoutScore.score }));
 
-      // ── Agent 3: SVG Renderer ────────────────────────────────────────────
+      // ── Agent 3: SVG Renderer (streaming) ───────────────────────────────
       setAgent("svg", "running");
-      addLog("SVG Renderer: generating architectural drawing…");
+      addLog("SVG Renderer: streaming architectural drawing…");
       const svgPrompt = buildFloorPlanSVGPrompt(params, lyt, refinementNote);
-      const rawSVG = await claude(
+      let streamBuffer = "";
+      const rawSVG = await claudeStream(
         "You are a world-class architectural SVG drafter. Output only raw SVG code — no markdown, no explanation, no code fences. Start your response with <svg and end with </svg>.",
-        svgPrompt, 8000
+        svgPrompt,
+        8000,
+        (partial) => {
+          streamBuffer = partial;
+          const start = partial.indexOf("<svg");
+          if (start !== -1) {
+            let chunk = partial.slice(start);
+            if (!chunk.includes("</svg>")) chunk += "</svg>";
+            setSvgCode(chunk);
+          }
+        }
       );
       const svgMatch = rawSVG.match(/<svg[\s\S]*?<\/svg>/i);
-      const newSVG = svgMatch ? svgMatch[0] : rawSVG;
+      const rawFinal = svgMatch ? svgMatch[0] : rawSVG;
+      const newSVG = injectAnnotations(rawFinal, lyt.rooms, params.plotW, params.plotH);
       setSvgCode(newSVG);
-      addLog("SVG Renderer: ✓ floor plan SVG generated");
+      addLog("SVG Renderer: ✓ floor plan generated with dimensions & north arrow");
       setAgent("svg", "done");
       setAgentScores(s => ({ ...s, svg: 92 }));
 
@@ -581,18 +673,32 @@ export default function App() {
         }}>{notification}</div>
       )}
 
+      {/* ── Mobile drawer backdrop ── */}
+      {isMobile && mobileDrawer && (
+        <div onClick={() => setMobileDrawer(null)} style={{
+          position:'fixed', inset:0, zIndex:98,
+          background:'rgba(0,0,0,0.6)', backdropFilter:'blur(2px)',
+        }}/>
+      )}
+
       {/* ── Left Sidebar ── */}
-      <Sidebar
-        params={params}
-        onParamChange={handleParamChange}
-        onGenerate={() => generate()}
-        onGenerateAlts={generateAlts}
-        onExportSVG={exportSVG}
-        onExportPNG={exportPNG}
-        generating={generating}
-        hasPlan={!!svgCode}
-        regErrors={regErrors}
-      />
+      <div style={isMobile ? {
+        position:'fixed', top:0, left:0, bottom:0, zIndex:99,
+        transform: mobileDrawer==='left' ? 'translateX(0)' : 'translateX(-100%)',
+        transition:'transform 0.25s ease',
+      } : {}}>
+        <Sidebar
+          params={params}
+          onParamChange={handleParamChange}
+          onGenerate={() => { generate(); setMobileDrawer(null); }}
+          onGenerateAlts={generateAlts}
+          onExportSVG={exportSVG}
+          onExportPNG={exportPNG}
+          generating={generating}
+          hasPlan={!!svgCode}
+          regErrors={regErrors}
+        />
+      </div>
 
       {/* ── Main content ── */}
       <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", minWidth:0 }}>
@@ -602,18 +708,26 @@ export default function App() {
           display:"flex", alignItems:"stretch",
           borderBottom:"2px solid #1A1A28",
           background:"#060610",
-          padding:"0 16px",
+          padding:`0 ${isMobile?8:16}px`,
           gap:2,
           overflowX:"auto",
           flexShrink:0,
         }}>
+          {/* Mobile: hamburger for left sidebar */}
+          {isMobile && (
+            <button onClick={() => setMobileDrawer(d => d==='left' ? null : 'left')} style={{
+              padding:"0 12px", background:"transparent", border:"none",
+              color:"#666", fontSize:18, cursor:"pointer", flexShrink:0,
+            }}>☰</button>
+          )}
+
           {TABS.map((t, idx) => t.type === "sep"
             ? <div key={`sep-${idx}`} style={{ width:1, background:"#1A1A2A", alignSelf:"stretch", margin:"8px 6px", flexShrink:0 }}/>
             : <button key={t.id} onClick={()=>{
                 setTab(t.id);
                 if (t.id === "saved" || t.id === "compare") fetchPlans();
               }} style={{
-                padding:"12px 14px",
+                padding:`12px ${isMobile?10:14}px`,
                 background:"transparent",
                 border:"none",
                 borderBottom: tab===t.id ? "2px solid #4488FF" : "2px solid transparent",
@@ -625,6 +739,14 @@ export default function App() {
                 marginBottom:"-2px",
                 whiteSpace:"nowrap",
               }}>{t.label}</button>
+          )}
+
+          {/* Mobile: controls button for right panel */}
+          {isMobile && (
+            <button onClick={() => setMobileDrawer(d => d==='right' ? null : 'right')} style={{
+              marginLeft:"auto", padding:"0 12px", background:"transparent", border:"none",
+              color:"#666", fontSize:16, cursor:"pointer", flexShrink:0,
+            }}>⚙</button>
           )}
         </div>
 
@@ -886,7 +1008,15 @@ export default function App() {
       </div>
 
       {/* ── Right: Agent Pipeline Panel ── */}
-      <div style={{
+      <div style={isMobile ? {
+        position:'fixed', top:0, right:0, bottom:0, zIndex:99,
+        transform: mobileDrawer==='right' ? 'translateX(0)' : 'translateX(100%)',
+        transition:'transform 0.25s ease',
+        width:240, minWidth:240,
+        background:"#080814", borderLeft:"2px solid #1A1A28",
+        display:"flex", flexDirection:"column",
+        overflow:"hidden", fontFamily:"monospace",
+      } : {
         width: 220, minWidth: 220,
         background: "#080814",
         borderLeft: "2px solid #1A1A28",

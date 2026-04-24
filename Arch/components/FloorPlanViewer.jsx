@@ -20,6 +20,8 @@ export default function FloorPlanViewer({
   const [pan, setPan] = useState({ x:0, y:0 });
   const dragging = useRef(false);
   const lastPos = useRef({ x:0, y:0 });
+  const lastTouchDist = useRef(null);
+  const lastTouchMid = useRef(null);
 
   // Inject furniture overlay
   let displaySVG = svgCode;
@@ -63,6 +65,44 @@ export default function FloorPlanViewer({
   }, []);
 
   const onMouseUp = useCallback(() => { dragging.current = false; }, []);
+
+  // Touch handlers
+  const onTouchStart = useCallback(e => {
+    if (e.touches.length === 1) {
+      dragging.current = true;
+      lastPos.current = { x:e.touches[0].clientX, y:e.touches[0].clientY };
+    } else if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      lastTouchDist.current = Math.hypot(dx, dy);
+      lastTouchMid.current = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+      };
+    }
+  }, []);
+
+  const onTouchMove = useCallback(e => {
+    e.preventDefault();
+    if (e.touches.length === 1 && dragging.current) {
+      const dx = e.touches[0].clientX - lastPos.current.x;
+      const dy = e.touches[0].clientY - lastPos.current.y;
+      lastPos.current = { x:e.touches[0].clientX, y:e.touches[0].clientY };
+      setPan(p => ({ x:p.x+dx, y:p.y+dy }));
+    } else if (e.touches.length === 2 && lastTouchDist.current) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      const ratio = dist / lastTouchDist.current;
+      lastTouchDist.current = dist;
+      setZoom(z => Math.min(4, Math.max(0.3, z * ratio)));
+    }
+  }, []);
+
+  const onTouchEnd = useCallback(() => {
+    dragging.current = false;
+    lastTouchDist.current = null;
+  }, []);
 
   const onWheel = useCallback(e => {
     e.preventDefault();
@@ -199,7 +239,10 @@ export default function FloorPlanViewer({
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseUp}
-        style={{ width:"100%", height:"100%", cursor:dragging.current?"grabbing":"grab", userSelect:"none" }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        style={{ width:"100%", height:"100%", cursor:dragging.current?"grabbing":"grab", userSelect:"none", touchAction:"none" }}
       >
         <div style={{
           width:"100%", height:"100%",
