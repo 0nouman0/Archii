@@ -23,9 +23,13 @@ export function buildFloorPlanSVGPrompt(params, layout, strategy = "") {
     return { name: r.name, x: r.x, y: r.y, w: r.w, h: r.h, ftW: r.ftW, ftH: r.ftH, wall, dx, dy };
   }).filter(r => !["Corridor", "Utility"].includes(r.name));
 
-  const roomList = roomDoorHints.map(r =>
-    `  • ${r.name}: rect x=${r.x} y=${r.y} w=${r.w} h=${r.h}  label="${r.name}\\n${r.ftW}×${r.ftH}m"  door-wall=${r.wall} door-at=(${r.dx},${r.dy})`
-  ).join("\n");
+  const roomList = roomDoorHints.map(r => {
+    const roomData = rooms.find(room => room.name === r.name);
+    const color = roomData?.color || "#F7F7F7";
+    // We provide the dimensions in FT for the label
+    const dimLabel = `${r.ftW}'×${r.ftH}'`;
+    return `  • ${r.name}: rect x=${r.x} y=${r.y} w=${r.w} h=${r.h} fill="${color}" dim="${dimLabel}" door-wall=${r.wall} door-at=(${r.dx},${r.dy})`;
+  }).join("\n");
 
   // Entrance door coords on building wall
   const ew = entrance.wall;
@@ -102,15 +106,14 @@ FORBIDDEN: <circle>, <ellipse>, <polygon>, <image>, <use>, gradients, filters, c
 For EVERY room listed below, draw:
 
 a) Room fill rectangle:
-   <rect x=… y=… width=… height=… fill="#F7F7F7" stroke="#333333" stroke-width="2.5"/>
-   (All rooms: fill="#F7F7F7" — plain off-white. No coloured fills.)
+   <rect x=… y=… width=… height=… fill="[provided room color]" stroke="#333333" stroke-width="2.5"/>
+   (Use the specific hex color provided for each room in the list below.)
 
-b) Room name (bold, centred):
-   <text x="[cx]" y="[cy-6]" font-size="11" font-weight="700" font-family="Arial,sans-serif" fill="#111111" text-anchor="middle">[Room Name]</text>
+b) Room name (bold, centered):
+   <text x="[cx]" y="[cy-2]" font-size="10" font-weight="700" font-family="Arial,sans-serif" fill="#111111" text-anchor="middle">[Room Name]</text>
 
-c) Dimension label (below name):
-   <text x="[cx]" y="[cy+10]" font-size="9" font-family="Arial,sans-serif" fill="#555555" text-anchor="middle">[WxH in metres]</text>
-   Convert px to metres: px ÷ ${scale} × 0.305, round to 1 decimal.
+c) Dimension label (below name, smaller):
+   <text x="[cx]" y="[cy+10]" font-size="7.5" font-family="Arial,sans-serif" fill="#666666" text-anchor="middle">[dim provided in list]</text>
 
 d) Door opening on the indicated wall:
    - ERASE a ${doorSize}px gap in that wall by drawing a white rect over it:
@@ -132,7 +135,7 @@ Door width = 36px.
 - Erase gap in outer wall: white rect ${OUTER + 2}px thick × 36px wide at the gap position
 - Door swing arc (opens outward toward setback zone):
   <path d="M [hinge],[hinge] L [far-end] M [hinge],[hinge] A 36,36 0 0,[sweep] [arc-end]" fill="none" stroke="#111111" stroke-width="1.8"/>
-- Label below/above arc: <text font-size="10" font-weight="700" fill="#0055AA" font-family="Arial">ENTRANCE</text>
+- Label near arc (shifted to avoid wall overlap): <text font-size="9" font-weight="700" fill="#0055AA" font-family="Arial" text-anchor="middle">ENTRANCE</text>
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ## STEP 7 — WINDOWS
@@ -173,9 +176,9 @@ Bottom-left corner, clean text only:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ## ABSOLUTE RULES — violating these fails the task
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✗ DO NOT fill any room with colour — all rooms must be fill="#F7F7F7"
 ✗ DO NOT draw any random circles, stars, polygons, or decorative shapes
 ✗ DO NOT place rooms beyond the building footprint (x=\${bldX}, y=\${bldY}, w=\${bldW}, h=\${bldH})
+✗ DO NOT overlap text labels; if a room is too small, move text outside or shrink it further
 ✗ DO NOT use <image>, <use>, filters, or clip-paths
 ✗ DO NOT place any element outside the SVG canvas (0,0,\${totalW},\${totalH})
 ✓ Every room MUST have a door arc

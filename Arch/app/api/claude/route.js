@@ -54,31 +54,48 @@ async function tryGroq(systemPrompt, userPrompt, maxTokens) {
   return completion.choices[0]?.message?.content || "";
 }
 
-async function tryNvidianim(systemPrompt, userPrompt, maxTokens) {
+async function tryNemotron(systemPrompt, userPrompt, maxTokens) {
   const key = process.env.NVIDIA_NIM_API_KEY;
   if (!isRealKey(key)) return null;
   const client = new OpenAI({
     apiKey: key,
     baseURL: "https://integrate.api.nvidia.com/v1",
   });
-  const completion = await client.chat.completions.create({
-    model: "meta/llama-3.1-405b-instruct",
-    max_tokens: Math.min(maxTokens, 4096),
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-  });
-  return completion.choices[0]?.message?.content || "";
+  
+  try {
+    // Using the user-specified GLM model with thinking enabled
+    const completion = await client.chat.completions.create({
+      model: "z-ai/glm-5.1",
+      max_tokens: Math.min(maxTokens, 16384),
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      // Thinking is slow for SVGs, disabling for better responsiveness
+      // chat_template_kwargs: { "enable_thinking": true, "clear_thinking": false }
+    });
+    return completion.choices[0]?.message?.content || "";
+  } catch (err) {
+    console.warn("[Nemotron] GLM-5.1 model failed, trying fallback model (Llama-405B)...", err.message);
+    const fallback = await client.chat.completions.create({
+      model: "meta/llama-3.1-405b-instruct",
+      max_tokens: Math.min(maxTokens, 4096),
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    });
+    return fallback.choices[0]?.message?.content || "";
+  }
 }
 
 // ─── Fallback orchestrator ────────────────────────────────────────────────────
 
 const PROVIDERS = [
+  { name: "NVIDIA (Nemotron/GLM)",     fn: tryNemotron },
   { name: "Anthropic (Claude Sonnet)", fn: tryAnthropic },
-  { name: "Google (Gemini 2.0 Flash)", fn: tryGemini },
   { name: "Groq (Llama-3.3-70B)",      fn: tryGroq },
-  { name: "NVIDIA NIM (Llama-3.1-405B)", fn: tryNvidianim },
+  { name: "Google (Gemini 2.0 Flash)", fn: tryGemini },
 ];
 
 export async function POST(request) {

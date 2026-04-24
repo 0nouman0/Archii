@@ -15,6 +15,7 @@ import {
   buildCostEstimatorPrompt,
   buildFurniturePrompt,
 } from "../../lib/prompts";
+import { supabase } from "../../lib/supabase";
 
 // ─── API helper (no apiKey — server handles it) ───────────────────────────────
 async function claude(sys, user, maxTokens = 4000) {
@@ -25,12 +26,39 @@ async function claude(sys, user, maxTokens = 4000) {
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
+  // Log which provider worked
+  console.log(`[AI] Response from: ${data.provider}`);
   return data.text || "";
 }
 
 function parseJSON(raw) {
   try { return JSON.parse(raw.replace(/```json|```/g, "").trim()); }
   catch { return null; }
+}
+
+async function savePlanToSupabase(data) {
+  try {
+    const { error } = await supabase
+      .from('generated_plans')
+      .insert([{
+        plot_width: data.params.plotW,
+        plot_height: data.params.plotH,
+        bhk: data.params.bhk,
+        facing: data.params.facing,
+        city: data.params.city,
+        budget: data.params.budget,
+        svg_code: data.svgCode,
+        vastu_score: data.vastuReport?.score,
+        total_cost: data.costReport?.totalCost,
+        rooms: data.layout?.rooms,
+        vastu_report: data.vastuReport,
+        cost_report: data.costReport,
+        furniture_layout: data.furnitureData
+      }]);
+    if (error) console.error("Supabase Save Error:", error.message);
+  } catch (err) {
+    console.error("Supabase Save Exception:", err);
+  }
 }
 
 // ─── Alternatives panel ───────────────────────────────────────────────────────
@@ -142,6 +170,8 @@ export default function App() {
   const [selectedAlt, setSelectedAlt]     = useState(null);
   const [scores, setScores]               = useState({ practical:null, vastu:null, cost:null });
   const [layout, setLayout]               = useState(null);
+  const [savedPlans, setSavedPlans]       = useState([]);
+  const [loadingSaved, setLoadingSaved]   = useState(false);
   const abortRef = useRef(false);
 
   const addLog = (msg) => setLog(l => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...l.slice(0, 79)]);
@@ -265,6 +295,16 @@ export default function App() {
       addLog("✓ All 6 agents complete");
       setTab("plan");
 
+      // Save to Supabase
+      savePlanToSupabase({
+        params,
+        svgCode: newSVG,
+        layout: lyt,
+        vastuReport: vParsed || vastuLayoutScore,
+        costReport: cParsed,
+        furnitureData: fParsed
+      });
+
     } catch (e) {
       addLog(`✗ Error: ${e.message}`);
       console.error(e);
@@ -274,9 +314,14 @@ export default function App() {
     setActiveAgent(null);
   }, [params, svgCode, setAgent]);
 
-  // ── Generate alternatives ──────────────────────────────────────────────────
+
+  // ── Generate alternatives (parallel design strategies) ──────────────────────
   const generateAlts = useCallback(async () => {
-    if (generating) return;
+    console.log("generateAlts triggered");
+    if (generating) {
+      console.log("generateAlts: already generating, skipping");
+      return;
+    }
     setGenerating(true);
     addLog("Generating 3 alternative design strategies in parallel…");
     const strategies = [
@@ -286,7 +331,9 @@ export default function App() {
     ];
     try {
       const lyt = computeLayout(params);
+      console.log("generateAlts: layout computed", lyt);
       const results = await Promise.all(strategies.map(async (strat, i) => {
+        console.log(`generateAlts: starting strategy ${i+1}`);
         const raw = await claude(
           "You are a world-class architectural SVG drafter. Output only raw SVG. Start with <svg and end with </svg>.",
           buildFloorPlanSVGPrompt(params, lyt, strat),
@@ -303,11 +350,58 @@ export default function App() {
       setSelectedAlt(0);
       setTab("alts");
       addLog(`✓ 3 alternatives generated`);
+
+      // Save alternatives to Supabase
+      results.forEach(alt => {
+        savePlanToSupabase({
+          params,
+          svgCode: alt.svg,
+          layout: lyt,
+          vastuReport: null,
+          costReport: null,
+          furnitureData: null
+        });
+      });
     } catch(e) {
+      console.error("generateAlts error:", e);
       addLog(`✗ Alt generation error: ${e.message}`);
     }
     setGenerating(false);
-  }, [params, generating]);
+  }, [params]); // Removed 'generating' from dependency to avoid stale state issues
+
+  // ── Fetch saved plans ──────────────────────────────────────────────────────
+  const fetchPlans = useCallback(async () => {
+    setLoadingSaved(true);
+    try {
+      const { data, error } = await supabase
+        .from('generated_plans')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setSavedPlans(data || []);
+    } catch (err) {
+      console.error("Fetch plans error:", err.message);
+    }
+    setLoadingSaved(false);
+  }, []);
+
+  const loadPlan = (plan) => {
+    setSvgCode(plan.svg_code);
+    setParams({
+      plotW: plan.plot_width,
+      plotH: plan.plot_height,
+      bhk: plan.bhk,
+      city: plan.city,
+      facing: plan.facing,
+      budget: plan.budget,
+      floors: 1, // default
+    });
+    setVastuReport(plan.vastu_report);
+    setCostReport(plan.cost_report);
+    setFurnitureData(plan.furniture_layout);
+    setTab("plan");
+    addLog(`✓ Loaded plan from ${new Date(plan.created_at).toLocaleDateString()}`);
+  };
 
   // ── Exports ────────────────────────────────────────────────────────────────
   const exportSVG = () => {
@@ -342,6 +436,7 @@ export default function App() {
     { id:"chat",   label:"Modify" },
     { id:"alts",   label:"Alts" },
     { id:"log",    label:"Log" },
+    { id:"saved",  label:"My Plans" },
   ];
 
   const vastuScore = vastuReport?.score ?? null;
@@ -382,7 +477,10 @@ export default function App() {
           gap:2,
         }}>
           {TABS.map(t => (
-            <button key={t.id} onClick={()=>setTab(t.id)} style={{
+            <button key={t.id} onClick={()=>{
+              setTab(t.id);
+              if (t.id === "saved") fetchPlans();
+            }} style={{
               padding:"12px 18px",
               background:"transparent",
               border:"none",
@@ -529,6 +627,66 @@ export default function App() {
                 Agent Activity Log
               </h2>
               <LogPanel log={log}/>
+            </div>
+          )}
+
+          {/* Saved Plans */}
+          {tab==="saved" && (
+            <div style={{ flex:1, overflow:"auto", padding:24 }}>
+              <div style={{ maxWidth:900 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
+                  <h2 style={{ fontSize:22, fontWeight:700, color:"#4488FF", fontFamily:"Georgia,serif" }}>
+                    My Saved Plans
+                  </h2>
+                  <button onClick={fetchPlans} style={{
+                    padding:"6px 12px", background:"#1A1A2A", border:"1px solid #2A2A3A",
+                    borderRadius:4, color:"#888", fontSize:11, cursor:"pointer", fontFamily:"monospace"
+                  }}>REFRESH</button>
+                </div>
+
+                {loadingSaved ? (
+                  <div style={{ color:"#555", fontFamily:"monospace" }}>Fetching from Supabase…</div>
+                ) : savedPlans.length === 0 ? (
+                  <div style={{ color:"#444", fontSize:11, fontFamily:"monospace" }}>No saved plans found in your database.</div>
+                ) : (
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))", gap:20 }}>
+                    {savedPlans.map((plan) => (
+                      <div key={plan.id} style={{
+                        background:"#0A0A14", border:"1px solid #1A1A2A", borderRadius:8,
+                        overflow:"hidden", display:"flex", flexDirection:"column",
+                        transition:"border-color 0.2s",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = "#4488FF"}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = "#1A1A2A"}
+                      >
+                        <div style={{
+                          height:140, background:"#FFF", overflow:"hidden", position:"relative",
+                          display:"flex", alignItems:"center", justifyContent:"center", padding:10
+                        }}>
+                          <div style={{ zoom:0.25, pointerEvents:"none" }} dangerouslySetInnerHTML={{ __html: plan.svg_code }} />
+                        </div>
+                        <div style={{ padding:14, flex:1, display:"flex", flexDirection:"column" }}>
+                          <div style={{ fontSize:12, fontWeight:700, color:"#DDD", marginBottom:4 }}>
+                            {plan.plot_width}×{plan.plot_height}ft · {plan.bhk}BHK
+                          </div>
+                          <div style={{ fontSize:10, color:"#666", fontFamily:"monospace", marginBottom:12 }}>
+                            {plan.city} · {new Date(plan.created_at).toLocaleDateString()}
+                          </div>
+                          <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+                            {plan.vastu_score && <div style={{ fontSize:10, color:"#44DD88", fontWeight:700 }}>Vastu: {plan.vastu_score}</div>}
+                            {plan.total_cost && <div style={{ fontSize:10, color:"#CC66FF", fontWeight:700 }}>₹{plan.total_cost}L</div>}
+                          </div>
+                          <button onClick={() => loadPlan(plan)} style={{
+                            width:"100%", padding:"8px", background:"#4488FF", border:"none",
+                            borderRadius:4, color:"#FFF", fontSize:10, fontWeight:700,
+                            cursor:"pointer", textTransform:"uppercase", letterSpacing:"0.05em"
+                          }}>Load Plan</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
