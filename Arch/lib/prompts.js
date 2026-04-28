@@ -90,7 +90,12 @@ Place windows on EXTERIOR walls only, per vastu:
   • Do NOT place windows on walls shared between two rooms
 `;
 
-  return basePrompt + zoneSection + topologySection + windowSection + staircaseSection + ragSection + refineSection;
+  // Cap RAG section to avoid blowing past Groq's 12K TPM limit
+  const ragTrimmed = ragSection.length > 1500
+    ? ragSection.slice(0, 1500) + "\n...[truncated for token limit]\n"
+    : ragSection;
+
+  return basePrompt + zoneSection + topologySection + windowSection + staircaseSection + ragTrimmed + refineSection;
 }
 
 export function buildFloorPlanSVGPrompt(params, layout, strategy = "") {
