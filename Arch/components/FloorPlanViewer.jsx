@@ -113,32 +113,77 @@ export default function FloorPlanViewer({
       });
     }
 
-    // 6. Doors (D3 Arcs)
-    // We assume each room has a door at a generic location for now
-    // In a real app, doors would be part of the layout data
-    const arcGenerator = d3.arc()
-      .innerRadius(0)
-      .outerRadius(8)
-      .startAngle(0)
-      .endAngle(Math.PI / 2);
+    // 6. Doors — shared wall detection, door arc at midpoint of each shared wall
+    const DS = Math.max(12, Math.min(20, W / 18));
+    const usedWalls = new Set();
+    const TOL = 3;
+    const BGFILL = theme === 'dark' ? "#080814" : "#F5F5F0";
+    const DCOL   = theme === 'dark' ? "#4488FF88" : "#777";
 
-    roomGroups.filter(d => d.name !== "Corridor" && d.name !== "Utility")
-      .append("path")
-      .attr("d", arcGenerator)
-      .attr("transform", d => `translate(${d.x + PAD + 2}, ${d.y + PAD + 2})`)
-      .attr("fill", "none")
-      .attr("stroke", theme === 'dark' ? "#4488FF88" : "#666")
-      .attr("stroke-width", 1);
+    for (let i = 0; i < rooms.length; i++) {
+      for (let j = i + 1; j < rooms.length; j++) {
+        const a = rooms[i], b = rooms[j];
+        let wall = null;
 
-    // 7. Windows
-    roomGroups.filter(d => d.w > 30)
-      .append("rect")
-      .attr("x", d => d.x + d.w / 2 - 8 + PAD)
-      .attr("y", d => d.y + PAD - 1)
-      .attr("width", 16)
-      .attr("height", 2)
-      .attr("fill", "#4488FF")
-      .attr("opacity", 0.6);
+        if (Math.abs((a.x + a.w) - b.x) < TOL || Math.abs((b.x + b.w) - a.x) < TOL) {
+          const wx  = Math.abs((a.x + a.w) - b.x) < TOL ? a.x + a.w : b.x + b.w;
+          const top = Math.max(a.y, b.y), bot = Math.min(a.y + a.h, b.y + b.h);
+          if (bot - top > DS + 4) wall = { type:"V", wx, top, bot };
+        }
+        if (!wall && (Math.abs((a.y + a.h) - b.y) < TOL || Math.abs((b.y + b.h) - a.y) < TOL)) {
+          const wy  = Math.abs((a.y + a.h) - b.y) < TOL ? a.y + a.h : b.y + b.h;
+          const lft = Math.max(a.x, b.x), rgt = Math.min(a.x + a.w, b.x + b.w);
+          if (rgt - lft > DS + 4) wall = { type:"H", wy, lft, rgt };
+        }
+        if (!wall) continue;
+
+        const wid = `${wall.type}-${(wall.wx ?? wall.wy).toFixed(0)}`;
+        if (usedWalls.has(wid)) continue;
+        usedWalls.add(wid);
+
+        const dg = svg.append("g").attr("class", "door");
+        if (wall.type === "V") {
+          const mid = (wall.top + wall.bot) / 2;
+          const x = wall.wx + PAD, y1 = mid - DS / 2 + PAD, y2 = mid + DS / 2 + PAD;
+          dg.append("rect").attr("x", x - 2).attr("y", y1).attr("width", 5).attr("height", DS).attr("fill", BGFILL);
+          dg.append("line").attr("x1", x).attr("y1", y1).attr("x2", x).attr("y2", y2).attr("stroke", DCOL).attr("stroke-width", 1.2);
+          dg.append("path").attr("d", `M ${x} ${y2} A ${DS} ${DS} 0 0 1 ${x + DS} ${y1}`).attr("fill", "none").attr("stroke", DCOL).attr("stroke-width", 1).attr("stroke-dasharray", "3,2");
+        } else {
+          const mid = (wall.lft + wall.rgt) / 2;
+          const x1 = mid - DS / 2 + PAD, x2 = mid + DS / 2 + PAD, y = wall.wy + PAD;
+          dg.append("rect").attr("x", x1).attr("y", y - 2).attr("width", DS).attr("height", 5).attr("fill", BGFILL);
+          dg.append("line").attr("x1", x1).attr("y1", y).attr("x2", x2).attr("y2", y).attr("stroke", DCOL).attr("stroke-width", 1.2);
+          dg.append("path").attr("d", `M ${x2} ${y} A ${DS} ${DS} 0 0 0 ${x1} ${y + DS}`).attr("fill", "none").attr("stroke", DCOL).attr("stroke-width", 1).attr("stroke-dasharray", "3,2");
+        }
+      }
+    }
+
+    // 7. Windows — exterior walls (where rooms touch the building envelope boundary)
+    const WIN = 10;
+    const WC = theme === 'dark' ? "#4488FF55" : "#87CEEB88";
+    const WS = theme === 'dark' ? "#4488FF" : "#5AACCC";
+    rooms.forEach(r => {
+      // top exterior
+      if (bldY && Math.abs(r.y - (bldY + OUTER)) < TOL * 2 && r.w > WIN * 3) {
+        svg.append("rect").attr("x", r.x + r.w / 2 - WIN + PAD).attr("y", r.y + PAD - 2)
+          .attr("width", WIN * 2).attr("height", 4).attr("fill", WC).attr("stroke", WS).attr("stroke-width", 1.2).attr("rx", 1);
+      }
+      // bottom exterior
+      if (bldY && bldH && Math.abs(r.y + r.h - (bldY + bldH - OUTER)) < TOL * 2 && r.w > WIN * 3) {
+        svg.append("rect").attr("x", r.x + r.w / 2 - WIN + PAD).attr("y", r.y + r.h + PAD - 2)
+          .attr("width", WIN * 2).attr("height", 4).attr("fill", WC).attr("stroke", WS).attr("stroke-width", 1.2).attr("rx", 1);
+      }
+      // left exterior
+      if (bldX && Math.abs(r.x - (bldX + OUTER)) < TOL * 2 && r.h > WIN * 3) {
+        svg.append("rect").attr("x", r.x + PAD - 2).attr("y", r.y + r.h / 2 - WIN + PAD)
+          .attr("width", 4).attr("height", WIN * 2).attr("fill", WC).attr("stroke", WS).attr("stroke-width", 1.2).attr("rx", 1);
+      }
+      // right exterior
+      if (bldX && bldW && Math.abs(r.x + r.w - (bldX + bldW - OUTER)) < TOL * 2 && r.h > WIN * 3) {
+        svg.append("rect").attr("x", r.x + r.w + PAD - 2).attr("y", r.y + r.h / 2 - WIN + PAD)
+          .attr("width", 4).attr("height", WIN * 2).attr("fill", WC).attr("stroke", WS).attr("stroke-width", 1.2).attr("rx", 1);
+      }
+    });
 
     // 8. Furniture (if data-driven)
     if (showFurniture && furniture?.placements) {
@@ -235,6 +280,31 @@ export default function FloorPlanViewer({
     scaleBar.append("line").attr("x1", bx).attr("y1", by-3).attr("x2", bx).attr("y2", by+1).attr("stroke", theme==='dark'?'#666':'#999').attr("stroke-width", 1.5);
     scaleBar.append("line").attr("x1", bx + bPx).attr("y1", by-3).attr("x2", bx + bPx).attr("y2", by+1).attr("stroke", theme==='dark'?'#666':'#999').attr("stroke-width", 1.5);
     scaleBar.append("text").attr("x", bx + bPx / 2).attr("y", by - 5).attr("text-anchor", "middle").attr("font-size", 7).attr("fill", theme==='dark'?'#666':'#999').attr("font-family", "monospace").text("5 ft");
+
+    // 12. Entrance marker
+    if (entrance) {
+      const EC = "#22AA66";
+      const ex = entrance.x + PAD, ey = entrance.y + PAD;
+      const DE = 16;
+      const eg = svg.append("g").attr("class", "entrance");
+      if (entrance.wall === "top") {
+        eg.append("rect").attr("x", ex - DE/2).attr("y", ey - 3).attr("width", DE).attr("height", 6).attr("fill", EC).attr("opacity", 0.25);
+        eg.append("line").attr("x1", ex - DE/2).attr("y1", ey).attr("x2", ex + DE/2).attr("y2", ey).attr("stroke", EC).attr("stroke-width", 2);
+        eg.append("text").attr("x", ex).attr("y", ey - 7).attr("text-anchor", "middle").attr("font-size", 6).attr("fill", EC).attr("font-family", "monospace").attr("font-weight", "700").text("ENTRY");
+      } else if (entrance.wall === "bottom") {
+        eg.append("rect").attr("x", ex - DE/2).attr("y", ey - 3).attr("width", DE).attr("height", 6).attr("fill", EC).attr("opacity", 0.25);
+        eg.append("line").attr("x1", ex - DE/2).attr("y1", ey).attr("x2", ex + DE/2).attr("y2", ey).attr("stroke", EC).attr("stroke-width", 2);
+        eg.append("text").attr("x", ex).attr("y", ey + 13).attr("text-anchor", "middle").attr("font-size", 6).attr("fill", EC).attr("font-family", "monospace").attr("font-weight", "700").text("ENTRY");
+      } else if (entrance.wall === "right") {
+        eg.append("rect").attr("x", ex - 3).attr("y", ey - DE/2).attr("width", 6).attr("height", DE).attr("fill", EC).attr("opacity", 0.25);
+        eg.append("line").attr("x1", ex).attr("y1", ey - DE/2).attr("x2", ex).attr("y2", ey + DE/2).attr("stroke", EC).attr("stroke-width", 2);
+        eg.append("text").attr("x", ex + 10).attr("y", ey + 3).attr("text-anchor", "start").attr("font-size", 6).attr("fill", EC).attr("font-family", "monospace").attr("font-weight", "700").text("ENTRY");
+      } else {
+        eg.append("rect").attr("x", ex - 3).attr("y", ey - DE/2).attr("width", 6).attr("height", DE).attr("fill", EC).attr("opacity", 0.25);
+        eg.append("line").attr("x1", ex).attr("y1", ey - DE/2).attr("x2", ex).attr("y2", ey + DE/2).attr("stroke", EC).attr("stroke-width", 2);
+        eg.append("text").attr("x", ex - 8).attr("y", ey + 3).attr("text-anchor", "end").attr("font-size", 6).attr("fill", EC).attr("font-family", "monospace").attr("font-weight", "700").text("ENTRY");
+      }
+    }
 
   }, [layout, theme, showLabels, showFurniture, furniture, showSunPath, city, params.plotW]);
 

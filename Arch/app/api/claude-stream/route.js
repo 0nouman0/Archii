@@ -68,7 +68,7 @@ async function streamGemini(systemPrompt, userPrompt, maxTokens) {
   if (!isRealKey(key)) return null;
   const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   // Initial request to see if provider is up
   const result = await model.generateContentStream(`${systemPrompt}\n\n${userPrompt}`);
@@ -94,15 +94,14 @@ async function streamGroq(systemPrompt, userPrompt, maxTokens) {
   const key = process.env.GROQ_API_KEY;
   if (!isRealKey(key)) return null;
   
-  // Groq free tier: 12,000 TPM total. Reserve 4000 for output -> 8000 for input.
-  const inputBudget = 8000;
-  const sys = truncateToTokens(systemPrompt, Math.floor(inputBudget * 0.6));
-  const usr = truncateToTokens(userPrompt,   Math.floor(inputBudget * 0.4));
+  // Truncate input to avoid blowing context; reserve headroom for output.
+  const sys = truncateToTokens(systemPrompt, 6000);
+  const usr = truncateToTokens(userPrompt,   4000);
 
   const client = new Groq({ apiKey: key });
   const stream = await client.chat.completions.create({
     model: "llama-3.3-70b-versatile",
-    max_tokens: Math.min(maxTokens, 4000),
+    max_tokens: Math.min(maxTokens, 6000),
     messages: [{ role: "system", content: sys }, { role: "user", content: usr }],
     stream: true,
   });
@@ -153,45 +152,52 @@ async function streamNvidia(systemPrompt, userPrompt, maxTokens) {
   });
 }
 
-// ─── Main Pipeline ───────────────────────────────────────────────────────────
+// ─── Provider registry ───────────────────────────────────────────────────────
 
-const PROVIDERS = [
-  { name: "Anthropic", fn: streamAnthropic },
-  { name: "Gemini",    fn: streamGemini },
-  { name: "Groq",      fn: streamGroq },
-  { name: "NVIDIA",    fn: streamNvidia },
-];
+const PROVIDER_MAP = {
+  anthropic: { name: "Anthropic", fn: streamAnthropic },
+  gemini:    { name: "Gemini",    fn: streamGemini    },
+  groq:      { name: "Groq",      fn: streamGroq      },
+  nvidia:    { name: "NVIDIA",    fn: streamNvidia    },
+};
+
+const DEFAULT_ORDER = ["anthropic", "gemini", "groq", "nvidia"];
+
+function buildProviderChain(priorities = []) {
+  const seen = new Set(priorities);
+  const rest = DEFAULT_ORDER.filter(k => !seen.has(k));
+  return [...priorities, ...rest]
+    .map(k => PROVIDER_MAP[k])
+    .filter(Boolean);
+}
 
 export async function POST(request) {
-  const { systemPrompt, userPrompt, maxTokens = 8000 } = await request.json();
+  const { systemPrompt, userPrompt, maxTokens = 8000, providers } = await request.json();
 
   if (!systemPrompt || !userPrompt) {
     return Response.json({ error: "Missing prompts" }, { status: 400 });
   }
 
+  const chain  = buildProviderChain(providers || []);
   const errors = [];
 
-  for (const { name, fn } of PROVIDERS) {
+  for (const { name, fn } of chain) {
     try {
-      console.log(`[Stream Pipeline] Trying ${name}...`);
+      console.log(`[Stream Shard] Trying ${name}...`);
       const readable = await fn(systemPrompt, userPrompt, maxTokens);
       if (readable) {
-        console.log(`[Stream Pipeline] ✓ ${name} connected`);
+        console.log(`[Stream Shard] ✓ ${name} connected`);
         return streamResponse(readable);
       }
     } catch (e) {
       const status = e.status || e.response?.status || 500;
-      console.error(`[Stream Pipeline] ✗ ${name} failed (${status}):`, e.message);
+      console.error(`[Stream Shard] ✗ ${name} failed (${status}):`, e.message);
       errors.push(`${name}: ${e.message}`);
-      
-      // If it's a 401/403 (unauthorized), we definitely want to skip to next
-      // If it's a 503/429 (overload), we definitely want to skip
-      // In all cases, try next provider
     }
   }
 
-  return Response.json({ 
+  return Response.json({
     error: "All streaming providers failed or unconfigured.",
-    details: errors 
+    details: errors
   }, { status: 503 });
 }

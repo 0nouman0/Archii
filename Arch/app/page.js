@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import ArchiLogo from "../components/ArchiLogo";
 
 /** Hero headline: cycling prefix (Vastu, Mīmārī, Christian, municipal / codes). */
 const HERO_PREFIX_WORDS = [
@@ -275,18 +276,26 @@ export default function LandingPage() {
       overflow: "hidden",
       position: "relative",
     }}>
-      {/* Nav */}
+      {/* ── Unified floating nav ── */}
       <nav style={{
-        position:'sticky', top:0, zIndex:100,
-        display:'flex', alignItems:'center', gap:16,
-        padding:'12px 32px',
-        background:'rgba(8,8,20,0.92)', backdropFilter:'blur(12px)',
-        borderBottom:'1px solid #1A1A28',
-        flexWrap:'wrap',
+        position:'fixed', top:12, left:'50%', transform:'translateX(-50%)',
+        zIndex:200,
+        display:'flex', alignItems:'center', gap:0,
+        padding:'0 18px',
+        height:46,
+        background:'rgba(8,8,20,0.88)', backdropFilter:'blur(16px)',
+        border:'1px solid rgba(255,255,255,0.07)',
+        borderRadius:12,
+        boxShadow:'0 4px 32px rgba(0,0,0,0.5)',
+        maxWidth:'calc(100vw - 32px)',
       }}>
-        <span style={{ fontSize:16, fontWeight:700, color:'#F0E040', fontFamily:'Georgia,serif', marginRight:8 }}>
-          वास्तु AI
-        </span>
+        {/* Brand */}
+        <ArchiLogo size={22} textSize={13} href="/"/>
+
+        {/* Divider */}
+        <div style={{ width:1, height:20, background:'#1A1A2A', margin:'0 14px' }}/>
+
+        {/* Nav links */}
         {[
           { href:'/app',         label:'Studio',       color:'#4488FF' },
           { href:'/presets',     label:'Presets',      color:'#44DD88' },
@@ -296,14 +305,42 @@ export default function LandingPage() {
           { href:'/dashboard',   label:'Dashboard',    color:'#888899' },
         ].map(link => (
           <a key={link.href} href={link.href} style={{
-            color: link.color, fontSize:11, fontWeight:600,
+            color: link.color, fontSize:10.5, fontWeight:600,
             textDecoration:'none', fontFamily:'monospace',
-            letterSpacing:'0.05em', opacity:0.85,
+            letterSpacing:'0.05em', opacity:0.75,
+            padding:'0 10px', height:46,
+            display:'flex', alignItems:'center',
             transition:'opacity 0.15s',
           }}
-          onMouseEnter={e => e.target.style.opacity='1'}
-          onMouseLeave={e => e.target.style.opacity='0.85'}
+          onMouseEnter={e => e.currentTarget.style.opacity='1'}
+          onMouseLeave={e => e.currentTarget.style.opacity='0.75'}
           >{link.label}</a>
+        ))}
+
+        {/* Divider */}
+        <div style={{ width:1, height:20, background:'#1A1A2A', margin:'0 6px 0 4px' }}/>
+
+        {/* Provider pills */}
+        {[
+          { label:'Claude', color:'#CC8855' },
+          { label:'Gemini', color:'#4488FF' },
+          { label:'Groq',   color:'#44DD88' },
+          { label:'NIM',    color:'#CC66FF' },
+        ].map((p, i) => (
+          <div key={p.label} style={{
+            display:'inline-flex', alignItems:'center', gap:5,
+            padding:'3px 9px', borderRadius:20,
+            border:`1px solid ${p.color}35`,
+            fontSize:9.5, fontFamily:'monospace',
+            color:p.color, letterSpacing:'0.04em',
+            marginLeft:4,
+          }}>
+            <div style={{
+              width:5, height:5, borderRadius:'50%', background:p.color,
+              animation:`dotPulse 2s ease-in-out ${i*0.5}s infinite`,
+            }}/>
+            {p.label}
+          </div>
         ))}
       </nav>
 
@@ -394,21 +431,6 @@ export default function LandingPage() {
           border-color: rgba(68,136,255,0.25);
           transform: translateY(-3px);
         }
-        .provider-pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 5px 12px;
-          border-radius: 20px;
-          border: 1px solid;
-          font-size: 11px;
-          font-family: monospace;
-          letter-spacing: 0.04em;
-        }
-        .dot {
-          width: 6px; height: 6px;
-          border-radius: 50%;
-        }
       `}</style>
 
       {/* Animated canvas background */}
@@ -426,55 +448,13 @@ export default function LandingPage() {
         pointerEvents: "none", zIndex: 0,
       }} />
 
-      {/* ── Nav ─────────────────────────────────────────────────────────────── */}
-      <nav style={{
-        position: "relative", zIndex: 10,
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "20px 48px",
-        borderBottom: "1px solid rgba(255,255,255,0.05)",
-        background: "rgba(8,8,20,0.8)",
-        backdropFilter: "blur(12px)",
-      }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontSize: 22, color: "#E8E8F4", fontFamily: "Georgia, serif" }}>वास्तु</span>
-          <span style={{ fontSize: 22, color: "#F0E040", fontFamily: "Georgia, serif", fontWeight: 700 }}>AI</span>
-          <span style={{
-            marginLeft: 6, fontSize: 9, color: "#333",
-            letterSpacing: "0.18em", textTransform: "uppercase",
-            fontFamily: "monospace",
-          }}>Architectural Design Platform</span>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {/* AI provider pills */}
-          {[
-            { label: "Claude", color: "#CC8855" },
-            { label: "Gemini", color: "#4488FF" },
-            { label: "Groq",   color: "#44DD88" },
-            { label: "NIM",    color: "#CC66FF" },
-          ].map((p, i) => (
-            <div key={p.label} className="provider-pill" style={{
-              borderColor: `${p.color}40`,
-              color: p.color,
-              animationDelay: `${i * 0.3}s`,
-            }}>
-              <div className="dot" style={{
-                background: p.color,
-                animation: `dotPulse 2s ease-in-out ${i * 0.5}s infinite`,
-              }} />
-              {p.label}
-            </div>
-          ))}
-        </div>
-      </nav>
-
       {/* ── Hero ────────────────────────────────────────────────────────────── */}
       <main style={{
         position: "relative", zIndex: 10,
         display: "flex", flexDirection: "column", alignItems: "center",
         justifyContent: "center",
-        minHeight: "calc(100vh - 80px)",
-        padding: "60px 24px 80px",
+        minHeight: "100vh",
+        padding: "100px 24px 80px",
         textAlign: "center",
       }}>
 

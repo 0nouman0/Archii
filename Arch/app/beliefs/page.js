@@ -141,7 +141,7 @@ function NavBar() {
           whiteSpace: "nowrap",
         }}
       >
-        वास्तु AI
+        Archi AI
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -751,7 +751,7 @@ export default function BeliefsPage() {
           color: C.muted,
         }}
       >
-        वास्तु AI — Belief Systems Glossary —{" "}
+        Archi AI — Belief Systems Glossary —{" "}
         {GLOSSARY_TERMS.length + ISLAMIC_TERMS.length + CHRISTIAN_TERMS.length}{" "}
         terms across 3 traditions
       </footer>

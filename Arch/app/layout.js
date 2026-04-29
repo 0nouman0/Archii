@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "वास्तु AI — Architectural Design Platform",
+  title: "Archi AI — Architectural Design Platform",
   description: "AI-powered Vastu-compliant floor plan generator for Indian residential buildings",
 };
 

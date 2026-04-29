@@ -35,11 +35,13 @@ export default function LoginPage() {
       }}>
         {/* Logo */}
         <div style={{ marginBottom:28 }}>
-          <div style={{ display:"flex", alignItems:"baseline", gap:6 }}>
-            <span style={{ fontSize:22, color:"#E8E8F4", fontFamily:"Georgia,serif" }}>वास्तु</span>
-            <span style={{ fontSize:22, color:"#F0E040", fontFamily:"Georgia,serif", fontWeight:700 }}>AI</span>
-          </div>
-          <div style={{ fontSize:8, color:"#333", letterSpacing:"0.18em", marginTop:4 }}>ARCHITECTURAL DESIGN PLATFORM</div>
+          <a href="/" style={{ textDecoration:"none", display:"flex", alignItems:"center", gap:8 }}>
+            <svg width="32" height="32" viewBox="0 0 28 28" fill="none"><rect x="0.75" y="0.75" width="26.5" height="26.5" rx="4" stroke="#4488FF" strokeWidth="1" fill="none" opacity="0.35"/><rect x="5" y="15" width="4" height="9" fill="#4488FF" rx="0.5"/><rect x="19" y="15" width="4" height="9" fill="#4488FF" rx="0.5"/><path d="M5 15.5 Q14 4 23 15.5" fill="none" stroke="#44DD88" strokeWidth="2.2" strokeLinecap="round"/><circle cx="14" cy="5.2" r="2.1" fill="#E8E8F0"/><line x1="3" y1="24" x2="25" y2="24" stroke="#4488FF" strokeWidth="1" opacity="0.4"/></svg>
+            <div>
+              <div style={{ fontSize:18, fontWeight:900, color:"#E8E8F0", fontFamily:"monospace", letterSpacing:"0.06em" }}>ARCHI<span style={{ color:"#4488FF" }}>AI</span></div>
+              <div style={{ fontSize:8, color:"#333", letterSpacing:"0.18em" }}>ARCHITECTURAL DESIGN PLATFORM</div>
+            </div>
+          </a>
         </div>
 
         {sent ? (

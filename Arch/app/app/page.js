@@ -1,6 +1,8 @@
 "use client";
 import { useState, useCallback, useRef, useEffect } from "react";
 import Sidebar       from "../../components/Sidebar";
+import FloorPlanWizard from "../../components/FloorPlanWizard";
+import ArchiLogo    from "../../components/ArchiLogo";
 import FloorPlanViewer from "../../components/FloorPlanViewer";
 import AgentPanel    from "../../components/AgentPanel";
 import VastuReport   from "../../components/VastuReport";
@@ -18,32 +20,32 @@ import {
   buildBeliefCriticPrompt,
   buildBeliefContext,
   buildCostEstimatorPrompt,
-  buildFurniturePrompt,
   buildExplainToParentsPrompt,
 } from "../../lib/prompts";
 import { getMaxFloors } from "../../lib/rag/knowledgeBase";
 import { supabase } from "../../lib/supabase";
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
-async function claude(sys, user, maxTokens = 4000) {
+// providers: optional priority array e.g. ['groq','gemini','anthropic','nvidia']
+async function claude(sys, user, maxTokens = 4000, providers) {
   const res = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ systemPrompt: sys, userPrompt: user, maxTokens }),
+    body: JSON.stringify({ systemPrompt: sys, userPrompt: user, maxTokens, providers }),
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
-  console.log(`[AI] Response from: ${data.provider}`);
+  console.log(`[AI Shard] ${providers?.[0] ?? "default"} → got: ${data.provider}`);
   return data.text || "";
 }
 
-// Streaming SVG — falls back to regular claude() if stream endpoint unavailable
-async function claudeStream(sys, user, maxTokens, onChunk) {
+// Streaming with provider priority — falls back to non-streaming if stream fails
+async function claudeStream(sys, user, maxTokens, onChunk, providers) {
   try {
     const res = await fetch("/api/claude-stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ systemPrompt: sys, userPrompt: user, maxTokens }),
+      body: JSON.stringify({ systemPrompt: sys, userPrompt: user, maxTokens, providers }),
     });
     if (!res.ok) throw new Error(`stream ${res.status}`);
     const reader = res.body.getReader();
@@ -57,12 +59,22 @@ async function claudeStream(sys, user, maxTokens, onChunk) {
     }
     return text;
   } catch {
-    // Fallback to non-streaming
-    const text = await claude(sys, user, maxTokens);
+    // Fallback to non-streaming via same provider shard
+    const text = await claude(sys, user, maxTokens, providers);
     onChunk(text);
     return text;
   }
 }
+
+// ─── Provider shard assignments ────────────────────────────────────────────────
+// Groq (Llama-3.3-70B) outputs at ~230 tok/sec vs Anthropic's ~30 tok/sec.
+// SVG at 3500 tokens: Groq ~15s, Anthropic ~120s. Groq wins decisively.
+// Post-SVG parallel agents: Vastu→Gemini, Cost→Groq (different pools, no contention).
+const SHARD = {
+  svg:   ["groq",    "gemini",  "anthropic", "nvidia"],  // Groq: 230 tok/sec
+  vastu: ["gemini",  "groq",    "anthropic", "nvidia"],  // Gemini: fast JSON, parallel-safe
+  cost:  ["groq",    "gemini",  "anthropic", "nvidia"],  // Groq again — SVG done by now
+};
 
 // ─── SVG post-processing ───────────────────────────────────────────────────────
 function injectAnnotations(svgCode, rooms, plotW, plotH) {
@@ -197,6 +209,69 @@ function buildLocalCostReport(params) {
   };
 }
 
+// ─── Local furniture placer — no AI call, instant ────────────────────────────
+function furnitureLocal(rooms) {
+  const M = 8; // wall margin px
+  const placements = rooms.map(r => {
+    const { name, x, y, w, h } = r;
+    const n = (name || "").toLowerCase();
+    const items = [];
+
+    if (n.includes("living") || n.includes("hall")) {
+      items.push(
+        { name:"Sofa",         x:x+M,          y:y+M,          w:Math.min(80,w-M*2), h:32,  color:"#8B7355", rotation:0 },
+        { name:"Coffee Table", x:x+M+20,       y:y+M+38,       w:35,  h:22,  color:"#6B5A45", rotation:0 },
+        { name:"TV Unit",      x:x+M,          y:y+h-M-12,     w:Math.min(60,w-M*2), h:12,  color:"#4A4A4A", rotation:0 },
+      );
+    } else if (n.includes("master") || (n.includes("bed") && n.includes("1"))) {
+      items.push(
+        { name:"King Bed",     x:x+Math.floor((w-60)/2), y:y+M,    w:60,  h:50,  color:"#8B7B8B", rotation:0 },
+        { name:"Wardrobe",     x:x+M,          y:y+h-M-12,     w:40,  h:12,  color:"#5A4A3A", rotation:0 },
+        { name:"Side Table",   x:x+M,          y:y+M+10,       w:14,  h:14,  color:"#7A6A5A", rotation:0 },
+      );
+    } else if (n.includes("bed")) {
+      items.push(
+        { name:"Double Bed",   x:x+Math.floor((w-50)/2), y:y+M,    w:50,  h:40,  color:"#9B8B9B", rotation:0 },
+        { name:"Wardrobe",     x:x+M,          y:y+h-M-12,     w:35,  h:12,  color:"#5A4A3A", rotation:0 },
+      );
+    } else if (n.includes("kitchen")) {
+      items.push(
+        { name:"Counter",      x:x+M,          y:y+M,          w:w-M*2, h:12,  color:"#C0A882", rotation:0 },
+        { name:"Refrigerator", x:x+w-M-20,     y:y+M+14,       w:20,  h:22,  color:"#AAAAAA", rotation:0 },
+      );
+    } else if (n.includes("dining")) {
+      items.push(
+        { name:"Dining Table", x:x+Math.floor((w-46)/2), y:y+Math.floor((h-28)/2), w:46, h:28, color:"#8B6A4A", rotation:0 },
+      );
+    } else if (n.includes("bath") || n.includes("toilet") || n.includes("wc")) {
+      items.push(
+        { name:"WC",           x:x+M,          y:y+M,          w:18,  h:22,  color:"#D8D8D8", rotation:0 },
+        { name:"Basin",        x:x+M,          y:y+h-M-14,     w:18,  h:14,  color:"#E8E8E8", rotation:0 },
+      );
+    } else if (n.includes("puja") || n.includes("prayer")) {
+      items.push(
+        { name:"Altar",        x:x+Math.floor((w-24)/2), y:y+M, w:24, h:18, color:"#F0E040", rotation:0 },
+      );
+    } else if (n.includes("study") || n.includes("office")) {
+      items.push(
+        { name:"Desk",         x:x+M,          y:y+M,          w:Math.min(50,w-M*2), h:22, color:"#7A6A5A", rotation:0 },
+        { name:"Chair",        x:x+M+10,       y:y+M+24,       w:20,  h:20,  color:"#5A5A5A", rotation:0 },
+      );
+    }
+
+    // Keep items inside room bounds
+    const safe = items.map(it => ({
+      ...it,
+      x: Math.max(x+M, Math.min(it.x, x+w-it.w-M)),
+      y: Math.max(y+M, Math.min(it.y, y+h-it.h-M)),
+    }));
+
+    return { room: r.name, items: safe };
+  }).filter(p => p.items.length > 0);
+
+  return { placements };
+}
+
 async function savePlanToSupabase(data) {
   try {
     const { data: { user } } = await supabase.auth.getUser();
@@ -264,6 +339,28 @@ async function callRefinementLoop(params, layout, vastuReport, ragContext) {
 // ─── Agent pipeline constants ─────────────────────────────────────────────────
 const AGENT_ORDER = ['input','spatial','rag','svg','vastu','cost','furniture'];
 const AGENT_WEIGHTS = { input:5, spatial:5, rag:10, svg:35, vastu:15, cost:15, furniture:15 };
+
+const FUN_FACTS = [
+  "Vastu Shastra dates back 5,000+ years — older than the Roman Colosseum.",
+  "The north-east corner (Ishanya) is reserved for prayer rooms in Vastu — it receives the most positive cosmic energy.",
+  "Indian residential buildings lose up to 23% resale value when they violate core Vastu zone rules.",
+  "Claude's SVG renderer can describe floor plans with 300+ geometric primitives in a single pass.",
+  "A typical 30×40ft 3BHK generates ~140 Vastu rule checks before the first pixel is drawn.",
+  "Parallel AI inference can save up to 60% wall-clock time vs. sequential chained calls.",
+  "The south-west corner is the 'Brahmasthan' zone — ideal for master bedrooms and load-bearing walls.",
+  "Kitchen in the south-east (Agni corner) aligns with fire energy — reducing cooking-related Vastu doshas.",
+  "Islāmī Mīmārī architecture emphasises geometric symmetry and courtyard-centred (sahn) floor plans.",
+  "Sacred Christian architecture orients the altar towards the east, symbolising the risen sun.",
+  "RAG (Retrieval-Augmented Generation) fetches real floor plan references to ground the AI's output.",
+  "Good east-facing plots receive morning light in living areas — associated with health & prosperity.",
+  "The average Indian construction cost of ₹2,400/sqft covers civil work, wiring, and basic finishes.",
+  "NBC 2016 mandates a minimum 1.2m wide staircase and 2.1m headroom for residential buildings.",
+  "North-facing kitchens are a Vastu violation — Vayu (air) energy conflicts with Agni (fire).",
+  "A 9-room layout can produce over 362,880 unique room arrangements — AI narrows it to the optimal few.",
+  "BBMP setback rules require 3ft on sides and 10ft at the front for plots under 2,400 sqft.",
+  "The golden ratio (1:1.618) appears in traditional Indian doorway proportions across many styles.",
+];
+
 const AGENT_LABELS = {
   input:    'Parsing constraints',
   spatial:  'Planning layout',
@@ -347,7 +444,7 @@ function DiffPanel({ prev, current }) {
 function PdfModal({ onExport, onClose }) {
   const [title, setTitle]  = useState("Floor Plan Proposal");
   const [client, setClient] = useState("");
-  const [arch, setArch]    = useState("वास्तु AI Studio");
+  const [arch, setArch]    = useState("Archi AI Studio");
   const IS = {
     width:"100%", padding:"8px 10px",
     background:"#0A0A14", border:"1px solid #2A2A3A",
@@ -420,6 +517,9 @@ export default function App() {
   const [params, setParams] = useState({
     plotW:30, plotH:40, bhk:3, city:"BBMP (Bengaluru)",
     facing:"North", budget:"Lower-Premium (₹40-60L)", floors:1, belief:"vastu",
+    hasParking:false, parkingCount:1, hasBalcony:false, hasPujaRoom:true,
+    hasDining:true, attachedBaths:"master", hasStudy:false, hasStore:true, hasUtility:true,
+    outputType:"image",
   });
   const [tab, setTab]             = useState("plan");
   const [svgCode, setSvgCode]     = useState("");
@@ -442,6 +542,10 @@ export default function App() {
   const [savedPlans, setSavedPlans]       = useState([]);
   const [loadingSaved, setLoadingSaved]   = useState(false);
   const abortRef = useRef(false);
+  const htmlAutoOpenRef = useRef(false);
+  const [phase, setPhase] = useState("wizard"); // "wizard" | "generating" | "plan"
+  const [showInputOverview, setShowInputOverview] = useState(false);
+  const [reportReady, setReportReady] = useState(false); // HTML report CTA flag
 
   // ── Phase-1 state ──────────────────────────────────────────────────────────
   const [theme, setTheme]             = useState('dark');
@@ -462,6 +566,19 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // ── postMessage from HTML report → switch canvas tab ──────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.data?.type === "ARCHI_SWITCH_TAB" && e.data.tab) {
+        setPhase("plan");
+        setTab(e.data.tab);
+        window.focus();
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
   // ── PDF modal ─────────────────────────────────────────────────────────────
   const [showPdfModal, setShowPdfModal] = useState(false);
 
@@ -475,6 +592,37 @@ export default function App() {
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
+
+  // Restore plan from sessionStorage on mount (survives HMR / accidental refresh)
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem("archi_plan");
+      if (!saved) return;
+      const { params: p, svgCode: s, vastuReport: v, costReport: c, genMode: g, imageUrl: img } = JSON.parse(saved);
+      if (!s && !img) return;
+      if (p)   setParams(pa => ({ ...pa, ...p }));
+      if (s)   setSvgCode(s);
+      if (v)   setVastuReport(v);
+      if (c)   setCostReport(c);
+      if (g)   setGenMode(g);
+      if (img) setImageUrl(img);
+      setPhase("plan");
+    } catch {}
+  }, []); // eslint-disable-line
+
+  // Auto-transition generating → plan; save to sessionStorage
+  useEffect(() => {
+    if (phase === "generating" && !generating && (svgCode || imageUrl)) {
+      // Persist so HMR/refresh doesn't lose the plan
+      try {
+        sessionStorage.setItem("archi_plan", JSON.stringify({
+          params, svgCode, vastuReport, costReport, genMode, imageUrl,
+        }));
+      } catch {}
+      setPhase("plan");
+      if (genMode === "html" && svgCode) setReportReady(true);
+    }
+  }, [generating, phase, svgCode, imageUrl]); // eslint-disable-line
 
   const addLog = (msg) => setLog(l => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...l.slice(0, 79)]);
 
@@ -504,6 +652,7 @@ export default function App() {
         remedies: getVastuRemedies(violations || []),
         summary: `${merged.plotW}×${merged.plotH}ft ${merged.bhk}BHK ${merged.facing}-facing layout follows standard Vastu zone placement.` });
       setCostReport(buildLocalCostReport(merged));
+      setPhase("plan");
       setTab("plan");
       addLog(`✓ Loaded preset: ${merged.plotW}×${merged.plotH}ft ${merged.bhk}BHK ${merged.facing}-facing`);
       addLog("ℹ Showing local hypothetical plan — click Generate for AI-enhanced version");
@@ -519,6 +668,74 @@ export default function App() {
     ? Math.min(97, Math.round(doneWeights + (runningId ? AGENT_WEIGHTS[runningId] * 0.5 : 0)))
     : 0;
   const currentAgentLabel = runningId ? AGENT_LABELS[runningId] : 'Processing';
+
+  // ── Fun facts rotation ────────────────────────────────────────────────────
+  const [factIndex, setFactIndex]   = useState(0);
+  const [factVisible, setFactVisible] = useState(true);
+  useEffect(() => {
+    if (phase !== "generating") return;
+    setFactIndex(Math.floor(Math.random() * FUN_FACTS.length));
+    const id = setInterval(() => {
+      setFactVisible(false);
+      setTimeout(() => {
+        setFactIndex(i => (i + 1) % FUN_FACTS.length);
+        setFactVisible(true);
+      }, 400);
+    }, 5000);
+    return () => clearInterval(id);
+  }, [phase]);
+
+  // ── Elapsed timer ──────────────────────────────────────────────────────────
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const _genStartRef = useRef(0);
+  useEffect(() => {
+    if (phase !== "generating") { setElapsedSec(0); return; }
+    _genStartRef.current = Date.now();
+    const id = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - _genStartRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [phase]);
+
+  // ── Smooth display progress ────────────────────────────────────────────────
+  const [displayPct, setDisplayPct] = useState(0);
+  const _genModeRef    = useRef(genMode);
+  const _progressRef   = useRef(0);
+  const _generatingRef = useRef(false);
+  useEffect(() => { _genModeRef.current    = genMode;    }, [genMode]);
+  useEffect(() => { _progressRef.current   = progress;   }, [progress]);
+  useEffect(() => { _generatingRef.current = generating; }, [generating]);
+
+  useEffect(() => {
+    if (phase !== "generating") {
+      if (phase === "plan") setDisplayPct(100);
+      else setDisplayPct(0);
+      return;
+    }
+    let curr = 0;
+    setDisplayPct(0);
+    const id = setInterval(() => {
+      const isImg = _genModeRef.current === "image";
+      if (isImg && _generatingRef.current) {
+        curr = Math.min(curr + 0.35, 88);
+        setDisplayPct(Math.round(curr));
+      } else {
+        const real = isImg ? 100 : Math.min(_progressRef.current, 97);
+        if (curr < real) {
+          // Fast-chase real agent progress
+          const gap = real - curr;
+          curr = Math.min(curr + (gap > 15 ? 1.5 : gap > 4 ? 0.8 : 0.3), real);
+        } else if (curr < 92) {
+          // Slow creep so bar never looks frozen — 0.06 %/tick ≈ ~0.75%/s
+          // Caps 20pts ahead of real so it can't lap the actual agents
+          const creepCap = Math.min(real + 20, 92);
+          curr = Math.min(curr + 0.06, creepCap);
+        }
+        setDisplayPct(Math.round(curr));
+      }
+    }, 80);
+    return () => clearInterval(id);
+  }, [phase]);
 
   const setAgent = useCallback((id, status) => {
     setAgentStatuses(s => ({ ...s, [id]: status }));
@@ -605,6 +822,7 @@ export default function App() {
   const generate = useCallback(async (refinementNote = "") => {
     abortRef.current = false;
     setGenerating(true);
+    setReportReady(false);
     setAgentStatuses({});
     setAgentScores({});
     setActiveAgent(null);
@@ -657,20 +875,19 @@ export default function App() {
       setAgent("svg", "running");
       addLog("SVG Renderer: streaming architectural drawing with RAG context…");
       const svgPrompt = buildFloorPlanSVGPromptWithRAG(params, lyt, refinementNote, { formattedContext: ragContext });
-      let streamBuffer = "";
       const rawSVG = await claudeStream(
-        "You are a world-class architectural SVG drafter. Output only raw SVG code — no markdown, no explanation, no code fences. Start your response with <svg and end with </svg>.",
+        "You are a world-class architectural SVG drafter. Output only raw SVG code — no markdown, no explanation, no code fences. No XML comments. No blank lines. Minimal whitespace. Start your response with <svg and end with </svg>.",
         svgPrompt,
-        9000,
+        3500,
         (partial) => {
-          streamBuffer = partial;
           const start = partial.indexOf("<svg");
           if (start !== -1) {
             let chunk = partial.slice(start);
             if (!chunk.includes("</svg>")) chunk += "</svg>";
             setSvgCode(chunk);
           }
-        }
+        },
+        SHARD.svg
       );
       const svgMatch = rawSVG.match(/<svg[\s\S]*?<\/svg>/i);
       const rawFinal = svgMatch ? svgMatch[0] : rawSVG;
@@ -680,58 +897,52 @@ export default function App() {
       setAgent("svg", "done");
       setAgentScores(s => ({ ...s, svg: 92 }));
 
-      // ── Agent 5: Belief System Critic ────────────────────────────────────
-      setAgent("vastu", "running");
+      // ── Agents 5+6+7: Belief Critic · Cost · Furniture — run in parallel ─
       const beliefCtx = buildBeliefContext(params.belief || 'vastu');
-      addLog(`${beliefCtx.label} Critic: auditing design rules…`);
-      const vastuRaw = await claude(
-        `You are a strict ${beliefCtx.label} expert. Respond ONLY as valid JSON with no markdown.`,
-        buildBeliefCriticPrompt(newSVG, lyt.rooms, params.plotW, params.plotH, params.belief || 'vastu'),
-        1800
-      );
+      setAgent("vastu",     "running");
+      setAgent("cost",      "running");
+      setAgent("furniture", "running");
+      addLog(`Sharding agents: SVG→Anthropic · Vastu→Groq · Cost→Gemini`);
+
+      // Furniture: local rule-based placer (instant, no AI call)
+      const fParsed = furnitureLocal(lyt.rooms);
+      setFurnitureData(fParsed);
+      setAgentScores(s => ({ ...s, furniture: 90 }));
+      addLog(`Furniture: ✓ ${fParsed.placements?.length || 0} rooms furnished (local)`);
+      setAgent("furniture", "done");
+
+      addLog(`${beliefCtx.label} Critic → Groq · Cost → Gemini (sharded, parallel)…`);
+      const [vastuRaw, costRaw] = await Promise.all([
+        claude(
+          `You are a strict ${beliefCtx.label} expert. Respond ONLY as valid JSON with no markdown.`,
+          buildBeliefCriticPrompt(newSVG, lyt.rooms, params.plotW, params.plotH, params.belief || 'vastu'),
+          1500,
+          SHARD.vastu
+        ),
+        claude(
+          "You are a senior Indian construction cost estimator. Respond ONLY as valid JSON with no markdown.",
+          buildCostEstimatorPrompt(params),
+          1800,
+          SHARD.cost
+        ),
+      ]);
+
+      // Process vastu
       let vParsed = parseJSON(vastuRaw);
       if (vParsed) {
         const remedies = getVastuRemedies(vParsed.violations || []);
         setVastuReport({ ...vParsed, remedies });
         setAgentScores(s => ({ ...s, vastu: vParsed.score }));
         setScores(sc => ({ ...sc, vastu: vParsed.score }));
-        addLog(`Vastu Critic: ✓ score ${vParsed.score}/100 — ${vParsed.violations?.length || 0} violations`);
+        addLog(`${beliefCtx.label} Critic: ✓ score ${vParsed.score}/100 — ${vParsed.violations?.length || 0} violations`);
       } else {
         vParsed = vastuLayoutScore;
         setVastuReport(vastuLayoutScore);
-        addLog("Vastu Critic: ✓ used layout-engine score");
+        addLog(`${beliefCtx.label} Critic: ✓ used layout-engine score`);
       }
       setAgent("vastu", "done");
 
-      // ── RAG Refinement Loop (if score < 75) ──────────────────────────────
-      if (vParsed && vParsed.score < 75) {
-        addLog(`⚡ Score ${vParsed.score}/100 below target — triggering LangGraph refinement loop…`);
-        const refinement = await callRefinementLoop(params, lyt, vParsed, ragResult);
-        if (refinement?.refined && refinement.svgCode) {
-          const refinedSVG = injectAnnotations(refinement.svgCode, lyt.rooms, params.plotW, params.plotH);
-          newSVG = refinedSVG;
-          setSvgCode(refinedSVG);
-          if (refinement.vastuReport) {
-            const remedies = getVastuRemedies(refinement.vastuReport.violations || []);
-            setVastuReport({ ...refinement.vastuReport, remedies });
-            setAgentScores(s => ({ ...s, vastu: refinement.vastuReport.score }));
-            setScores(sc => ({ ...sc, vastu: refinement.vastuReport.score }));
-            vParsed = refinement.vastuReport;
-          }
-          const stepCount = refinement.steps?.filter(s => s.node === 'generate').length || 1;
-          addLog(`✓ Refinement complete: score improved to ${refinement.finalScore}/100 (${stepCount} iteration${stepCount > 1 ? 's' : ''})`);
-        } else {
-          addLog("Refinement: ✓ no further improvement possible");
-        }
-      }
-
-      // ── Agent 5: Cost Estimator ──────────────────────────────────────────
-      setAgent("cost", "running");
-      addLog("Cost Estimator: computing BOM and cost breakdown…");
-      const costRaw = await claude(
-        "You are a senior Indian construction cost estimator. Respond ONLY as valid JSON with no markdown.",
-        buildCostEstimatorPrompt(params), 2500
-      );
+      // Process cost
       const cParsed = parseJSON(costRaw);
       if (cParsed) {
         setCostReport(cParsed);
@@ -743,24 +954,7 @@ export default function App() {
       }
       setAgent("cost", "done");
 
-      // ── Agent 6: Furniture AI ────────────────────────────────────────────
-      setAgent("furniture", "running");
-      addLog("Furniture AI: placing furniture with circulation clearances…");
-      const furRaw = await claude(
-        "You are an expert interior furniture planner. Respond ONLY as valid JSON with no markdown.",
-        buildFurniturePrompt(lyt.rooms, params.bhk), 2500
-      );
-      const fParsed = parseJSON(furRaw);
-      if (fParsed) {
-        setFurnitureData(fParsed);
-        setAgentScores(s => ({ ...s, furniture: 90 }));
-        addLog(`Furniture AI: ✓ ${fParsed.placements?.length || 0} rooms furnished`);
-      } else {
-        addLog("Furniture AI: ⚠ JSON parse failed, skipping");
-      }
-      setAgent("furniture", "done");
-
-      addLog("✓ All 6 agents complete");
+      addLog("✓ All agents complete");
       setTab("plan");
 
       // Save to Supabase
@@ -873,6 +1067,7 @@ export default function App() {
     setVastuReport(plan.vastu_report);
     setCostReport(plan.cost_report);
     setFurnitureData(plan.furniture_layout);
+    setPhase("plan");
     setTab("plan");
     addLog(`✓ Loaded plan from ${new Date(plan.created_at).toLocaleDateString()}`);
   };
@@ -902,63 +1097,161 @@ export default function App() {
     img.src = URL.createObjectURL(new Blob([svgCode], { type:"image/svg+xml" }));
   };
 
-  const exportPDF = ({ title = "Floor Plan Proposal", client = "", arch = "वास्तु AI Studio" } = {}) => {
+  const exportPDF = ({ title = "Floor Plan Proposal", client = "", arch = "Archi AI Studio", print: doPrint = true } = {}) => {
     if (!svgCode) return;
     setShowPdfModal(false);
-    const date = new Date().toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" });
-    const refNo = Math.random().toString(36).slice(2,8).toUpperCase();
-    const belief = params.belief || "vastu";
+    const date    = new Date().toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" });
+    const refNo   = Math.random().toString(36).slice(2,8).toUpperCase();
+    const belief  = params.belief || "vastu";
     const beliefLabel = { vastu:"Vastu Shastra", islamic:"Islāmī Mīmārī", christian:"Sacred Christian", universal:"Universal Design" }[belief] || "Vastu Shastra";
-    const scoreColor = vastuReport?.score >= 80 ? "#16A34A" : vastuReport?.score >= 60 ? "#D97706" : "#DC2626";
+    const beliefTabStr = { vastu:"Vastu", islamic:"Islamic", christian:"Christian", universal:"Design" }[belief] || "Vastu";
+    const scoreColor  = vastuReport?.score >= 80 ? "#16A34A" : vastuReport?.score >= 60 ? "#D97706" : "#DC2626";
 
     const costRows = costReport?.breakdown
       ? Object.entries(costReport.breakdown).filter(([,v]) => v > 0)
           .map(([k,v]) => `<tr><td style="padding:6px 12px;text-transform:capitalize;border-bottom:1px solid #EEE">${k}</td><td style="padding:6px 12px;text-align:right;border-bottom:1px solid #EEE;font-weight:600">₹${v}L</td></tr>`).join("")
       : "";
 
+    const vastuPassRows  = (vastuReport?.passes || vastuReport?.compliant || [])
+      .slice(0, 12)
+      .map(p => `<div class="vastu-pass">✓ ${typeof p === "string" ? p : (p.rule || p)}</div>`).join("");
+    const vastuFailRows  = (vastuReport?.violations || [])
+      .map(v => `<div class="vastu-fail"><span style="color:#D97706;font-weight:700">[${(v.severity||"note").toUpperCase()}]</span> ${v.rule} — ${v.fix}</div>`).join("");
+    const materialRows   = (costReport?.materials || [])
+      .map(m => `<tr><td style="padding:5px 12px;border-bottom:1px solid #EEE">${m.item}</td><td style="padding:5px 12px;border-bottom:1px solid #EEE;font-family:monospace">${m.qty}</td><td style="padding:5px 12px;border-bottom:1px solid #EEE;font-family:monospace">${m.rate}</td></tr>`).join("");
+    const phaseRows      = (costReport?.phases || [])
+      .map(p => `<tr><td style="padding:6px 12px;border-bottom:1px solid #EEE;font-weight:600">${p.name||p.phase||""}</td><td style="padding:6px 12px;border-bottom:1px solid #EEE;font-family:monospace">${p.duration||""}</td><td style="padding:6px 12px;border-bottom:1px solid #EEE;color:#555">${Array.isArray(p.activities)?p.activities.join(", "):(p.activities||"")}</td></tr>`).join("");
+
     const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8">
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
 <style>
-  @page { size:A3 portrait; margin:18mm 20mm; }
+  @page{size:A3 portrait;margin:15mm 18mm}
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:'Georgia',serif;background:#fff;color:#1A1A2A;font-size:11px}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1A1A2A;padding-bottom:14px;margin-bottom:20px}
-  .brand{font-size:26px;font-weight:700;font-family:serif}
-  .brand-sub{font-size:8px;color:#888;letter-spacing:0.18em;margin-top:3px}
+  /* ── sticky nav (screen only) ── */
+  .r-nav{position:sticky;top:0;z-index:99;background:#080814;border-bottom:2px solid #1A1A28;
+    display:flex;align-items:center;padding:0 16px;height:48px;font-family:monospace;gap:0;flex-wrap:nowrap}
+  .r-nav .brand{display:flex;align-items:center;gap:8px;text-decoration:none;margin-right:18px;flex-shrink:0}
+  .r-nav .brand-text{font-size:14px;font-weight:900;color:#E8E8F0;letter-spacing:0.08em}
+  .r-nav .brand-text b{color:#4488FF}
+  .r-nav .nav-group{display:flex;align-items:center;gap:0}
+  .r-nav .nav-label{font-size:8px;color:#333;letter-spacing:.14em;text-transform:uppercase;padding:0 8px;flex-shrink:0}
+  .r-nav a{color:#555;text-decoration:none;font-size:9.5px;font-weight:700;padding:0 11px;
+    height:48px;display:flex;align-items:center;letter-spacing:0.06em;text-transform:uppercase;
+    border-bottom:2px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap}
+  .r-nav a:hover{color:#4488FF;border-bottom-color:#4488FF}
+  .r-nav a.canvas-tab{color:#44DD88}
+  .r-nav a.canvas-tab:hover{color:#88FFBB;border-bottom-color:#44DD88}
+  .r-nav .sep{width:1px;background:#1A1A28;height:22px;margin:0 3px;flex-shrink:0}
+  .r-nav .close{margin-left:auto;color:#555;font-size:9px;font-weight:700;cursor:pointer;
+    border:1px solid #333;border-radius:5px;padding:4px 11px;height:auto;letter-spacing:.04em;
+    background:transparent;font-family:monospace;flex-shrink:0}
+  .r-nav .close:hover{color:#E8E8F0;border-color:#666}
+  /* ── sections ── */
+  .wrap{max-width:900px;margin:0 auto;padding:24px 28px 48px}
+  .p-header{display:flex;justify-content:space-between;align-items:flex-start;
+    border-bottom:3px solid #1A1A2A;padding-bottom:14px;margin-bottom:20px}
+  .brand-print{font-size:22px;font-weight:900;font-family:monospace;letter-spacing:.08em}
+  .brand-print b{color:#4488FF}
+  .brand-sub{font-size:8px;color:#888;letter-spacing:.18em;margin-top:3px;font-family:monospace}
   .proj{text-align:right;line-height:1.9;font-size:10px}
-  .plan-wrap{display:flex;justify-content:center;margin-bottom:20px;border:1px solid #E5E5E5;border-radius:4px;padding:16px;background:#FAFAFA}
-  .plan-wrap svg{max-width:100%;max-height:420px;height:auto;display:block}
+  .section{padding:20px 0;border-bottom:1px solid #EEE;scroll-margin-top:54px}
+  .section:last-child{border-bottom:none}
+  .section-title{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.12em;
+    border-bottom:1px solid #EEE;padding-bottom:6px;margin-bottom:12px;font-family:monospace}
+  .plan-wrap{display:flex;justify-content:center;border:1px solid #E5E5E5;border-radius:4px;
+    padding:16px;background:#FAFAFA}
+  .plan-wrap svg{max-width:100%;max-height:480px;height:auto;display:block}
   .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px}
   .stat{border:1px solid #E5E5E5;border-radius:4px;padding:10px 12px}
-  .stat-label{font-size:8px;color:#888;text-transform:uppercase;letter-spacing:0.1em}
+  .stat-label{font-size:8px;color:#888;text-transform:uppercase;letter-spacing:.1em}
   .stat-value{font-size:15px;font-weight:700;margin-top:4px}
-  .section-title{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:0.12em;border-bottom:1px solid #E5E5E5;padding-bottom:6px;margin-bottom:10px}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px}
   table{width:100%;border-collapse:collapse;font-size:10px}
-  thead th{background:#1A1A2A;color:#fff;padding:7px 12px;text-align:left;font-family:monospace;font-size:9px;letter-spacing:0.06em}
+  thead th{background:#1A1A2A;color:#fff;padding:7px 12px;text-align:left;
+    font-family:monospace;font-size:9px;letter-spacing:.06em}
   .total-row td{font-weight:700;font-size:11px;background:#F5F0FF;border-top:2px solid #1A1A2A}
-  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
-  .footer{border-top:1px solid #E5E5E5;padding-top:10px;margin-top:20px;display:flex;justify-content:space-between;font-size:8px;color:#AAA}
-  @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  .vastu-pass{padding:5px 0;border-bottom:1px solid #F5F5F5;font-size:10px;color:#16A34A}
+  .vastu-fail{padding:5px 0;border-bottom:1px solid #F5F5F5;font-size:10px}
+  .footer{border-top:1px solid #EEE;padding-top:10px;margin-top:20px;
+    display:flex;justify-content:space-between;font-size:8px;color:#AAA;font-family:monospace}
+  @media print{
+    .r-nav,.no-print{display:none!important}
+    .wrap{padding:0}
+    body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  }
 </style></head>
 <body>
-  <div class="header">
+
+<!-- Sticky nav (screen only) -->
+<nav class="r-nav">
+  <!-- Brand with arch SVG icon -->
+  <a href="#" class="brand" onclick="if(window.opener&&!window.opener.closed){window.opener.focus();}return false;">
+    <svg width="22" height="22" viewBox="0 0 28 28" fill="none">
+      <rect x="0.75" y="0.75" width="26.5" height="26.5" rx="4" stroke="#4488FF" stroke-width="1" fill="none" opacity="0.35"/>
+      <rect x="5" y="15" width="4" height="9" fill="#4488FF" rx="0.5"/>
+      <rect x="19" y="15" width="4" height="9" fill="#4488FF" rx="0.5"/>
+      <path d="M5 15.5 Q14 4 23 15.5" fill="none" stroke="#44DD88" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="14" cy="5.2" r="2.1" fill="#E8E8F0"/>
+    </svg>
+    <span class="brand-text">ARCHI<b>AI</b></span>
+  </a>
+
+  <!-- In-report section links -->
+  <div class="sep"></div>
+  <div class="nav-group">
+    <span class="nav-label">Report</span>
+    <a href="#floor-plan">Floor Plan</a>
+    ${vastuReport ? '<a href="#vastu">Vastu</a>' : ""}
+    ${costReport   ? '<a href="#cost">Cost</a>'   : ""}
+    ${costReport   ? '<a href="#timeline">Timeline</a>' : ""}
+    ${costReport?.materials?.length ? '<a href="#materials">Materials</a>' : ""}
+  </div>
+
+  <!-- Canvas tab links (switch tab in the opener React app) -->
+  <div class="sep"></div>
+  <div class="nav-group">
+    <span class="nav-label">Canvas</span>
+    <a class="canvas-tab" href="#" onclick="switchCanvas('vastu');return false;">${beliefTabStr}</a>
+    <a class="canvas-tab" href="#" onclick="switchCanvas('cost');return false;">Cost</a>
+    <a class="canvas-tab" href="#" onclick="switchCanvas('timeline');return false;">Timeline</a>
+    <a class="canvas-tab" href="#" onclick="switchCanvas('chat');return false;">Modify</a>
+    <a class="canvas-tab" href="#" onclick="switchCanvas('alts');return false;">Alts</a>
+    <a class="canvas-tab" href="#" onclick="switchCanvas('compare');return false;">Compare</a>
+  </div>
+
+  <button class="close" onclick="window.close()">✕ Close</button>
+</nav>
+<script>
+function switchCanvas(tabId) {
+  if (window.opener && !window.opener.closed) {
+    window.opener.postMessage({ type: "ARCHI_SWITCH_TAB", tab: tabId }, "*");
+    window.opener.focus();
+  } else {
+    window.location.href = "/app";
+  }
+}
+</script>
+
+<div class="wrap">
+  <!-- Print header -->
+  <div class="p-header">
     <div>
-      <div class="brand">वास्तु <span style="color:#6B21A8">AI</span></div>
+      <div class="brand-print">ARCHI<b>AI</b></div>
       <div class="brand-sub">ARCHITECTURAL DESIGN PLATFORM</div>
-      <div style="margin-top:10px;font-size:13px;font-weight:700;color:#1A1A2A">${title}</div>
+      <div style="margin-top:10px;font-size:13px;font-weight:700">${title}</div>
       ${client ? `<div style="font-size:10px;color:#555;margin-top:3px">Prepared for: ${client}</div>` : ""}
     </div>
     <div class="proj">
       <div style="font-weight:700;font-size:12px">${arch}</div>
       <div>Date: ${date}</div>
-      <div>Ref: VASTU-${refNo}</div>
+      <div>Ref: ARCHI-${refNo}</div>
       <div>Belief System: ${beliefLabel}</div>
     </div>
   </div>
 
-  <div class="plan-wrap">${svgCode}</div>
-
+  <!-- Key stats -->
   <div class="stats">
     <div class="stat"><div class="stat-label">Plot Size</div><div class="stat-value">${params.plotW}×${params.plotH} ft</div></div>
     <div class="stat"><div class="stat-label">BHK</div><div class="stat-value">${params.bhk} BHK</div></div>
@@ -967,48 +1260,87 @@ export default function App() {
     ${vastuReport ? `<div class="stat"><div class="stat-label">${beliefLabel.split(" ")[0]} Score</div><div class="stat-value" style="color:${scoreColor}">${vastuReport.score}/100</div></div>` : ""}
   </div>
 
-  ${costReport ? `
-  <div class="two-col">
-    <div>
-      <div class="section-title">Cost Breakdown</div>
-      <table>
-        <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
-        <tbody>${costRows}</tbody>
-        <tfoot><tr class="total-row"><td style="padding:8px 12px">Total Estimated Cost</td><td style="padding:8px 12px;text-align:right">₹${costReport.totalCost}L</td></tr></tfoot>
-      </table>
+  <!-- Floor Plan -->
+  <div class="section" id="floor-plan">
+    <div class="section-title">Floor Plan — ${params.plotW}×${params.plotH}ft · ${params.bhk}BHK · ${params.facing}-facing</div>
+    <div class="plan-wrap">${svgCode}</div>
+  </div>
+
+  <!-- Vastu Audit -->
+  ${vastuReport ? `
+  <div class="section" id="vastu">
+    <div class="section-title">${beliefLabel} Audit — Score ${vastuReport.score}/100</div>
+    <div class="two-col">
+      <div>
+        <div style="font-size:9px;color:#888;margin-bottom:6px;font-family:monospace">
+          VIOLATIONS (${(vastuReport.violations||[]).length})
+        </div>
+        ${vastuFailRows || '<div style="color:#16A34A;font-size:10px;padding:6px 0">No violations ✓</div>'}
+      </div>
+      <div>
+        <div style="font-size:9px;color:#888;margin-bottom:6px;font-family:monospace">
+          PASSES (${(vastuReport.passes||vastuReport.compliant||[]).length})
+        </div>
+        ${vastuPassRows || '<div style="color:#888;font-size:10px;padding:6px 0">—</div>'}
+      </div>
     </div>
-    <div>
-      <div class="section-title">Project Details</div>
-      <table>
-        <tbody>
-          <tr><td style="padding:5px 12px;border-bottom:1px solid #EEE;color:#888">Built-up Area</td><td style="padding:5px 12px;border-bottom:1px solid #EEE;text-align:right;font-weight:600">${costReport.builtUpArea?.toLocaleString("en-IN")} sqft</td></tr>
-          <tr><td style="padding:5px 12px;border-bottom:1px solid #EEE;color:#888">Rate / sqft</td><td style="padding:5px 12px;border-bottom:1px solid #EEE;text-align:right;font-weight:600">₹${costReport.perSqftRate?.toLocaleString("en-IN")}</td></tr>
-          <tr><td style="padding:5px 12px;border-bottom:1px solid #EEE;color:#888">Timeline</td><td style="padding:5px 12px;border-bottom:1px solid #EEE;text-align:right;font-weight:600">${costReport.timeline}</td></tr>
+    ${vastuReport.summary ? `<div style="margin-top:12px;font-size:10px;color:#555;font-style:italic;padding:8px 12px;background:#F8F8F0;border-left:3px solid #D97706;border-radius:0 4px 4px 0">${vastuReport.summary}</div>` : ""}
+  </div>` : ""}
+
+  <!-- Cost Breakdown -->
+  ${costReport ? `
+  <div class="section" id="cost">
+    <div class="section-title">Cost Estimation — ₹${costReport.totalCost}L</div>
+    <div class="two-col">
+      <div>
+        <table>
+          <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+          <tbody>${costRows}</tbody>
+          <tfoot><tr class="total-row"><td style="padding:8px 12px">Total Estimated Cost</td><td style="padding:8px 12px;text-align:right">₹${costReport.totalCost}L</td></tr></tfoot>
+        </table>
+      </div>
+      <div>
+        <table><tbody>
+          <tr><td style="padding:5px 12px;border-bottom:1px solid #EEE;color:#888">Built-up Area</td><td style="padding:5px 12px;border-bottom:1px solid #EEE;text-align:right;font-weight:600">${costReport.builtUpArea?.toLocaleString("en-IN")||"—"} sqft</td></tr>
+          <tr><td style="padding:5px 12px;border-bottom:1px solid #EEE;color:#888">Rate / sqft</td><td style="padding:5px 12px;border-bottom:1px solid #EEE;text-align:right;font-weight:600">₹${costReport.perSqftRate?.toLocaleString("en-IN")||"—"}</td></tr>
+          <tr><td style="padding:5px 12px;border-bottom:1px solid #EEE;color:#888">Timeline</td><td style="padding:5px 12px;border-bottom:1px solid #EEE;text-align:right;font-weight:600">${costReport.timeline||"—"}</td></tr>
           <tr><td style="padding:5px 12px;border-bottom:1px solid #EEE;color:#888">Budget Tier</td><td style="padding:5px 12px;border-bottom:1px solid #EEE;text-align:right;font-weight:600">${params.budget}</td></tr>
-          <tr><td style="padding:5px 12px;color:#888">Floors</td><td style="padding:5px 12px;text-align:right;font-weight:600">${params.floors === 1 ? "Ground Floor" : params.floors === 2 ? "G+1 Duplex" : "G+2 Triple"}</td></tr>
-        </tbody>
-      </table>
+          <tr><td style="padding:5px 12px;color:#888">Floors</td><td style="padding:5px 12px;text-align:right;font-weight:600">${params.floors===1?"Ground Floor":params.floors===2?"G+1 Duplex":"G+2 Triple"}</td></tr>
+        </tbody></table>
+      </div>
     </div>
   </div>` : ""}
 
-  ${vastuReport?.violations?.length ? `
-  <div style="margin-bottom:20px">
-    <div class="section-title">Design Notes — ${vastuReport.violations.length} Item(s) to Review</div>
-    ${vastuReport.violations.slice(0,5).map(v => `<div style="padding:5px 0;border-bottom:1px solid #F5F5F5;font-size:9px"><span style="color:#D97706;font-weight:700">[${(v.severity||"note").toUpperCase()}]</span> ${v.rule} — ${v.fix}</div>`).join("")}
+  <!-- Timeline -->
+  <div class="section" id="timeline">
+    <div class="section-title">Construction Timeline${costReport?.timeline ? ` — ${costReport.timeline}` : ""}</div>
+    ${phaseRows ? `<table><thead><tr><th>Phase</th><th>Duration</th><th>Activities</th></tr></thead><tbody>${phaseRows}</tbody></table>`
+      : `<div style="font-size:11px;color:#555;padding:6px 0">${costReport?.timeline ? `Estimated duration: <strong>${costReport.timeline}</strong>` : "Generate a plan to see the timeline."}</div>`}
+  </div>
+
+  <!-- Materials -->
+  ${materialRows ? `
+  <div class="section" id="materials">
+    <div class="section-title">Materials — Bill of Quantities</div>
+    <table>
+      <thead><tr><th>Material</th><th>Quantity</th><th>Rate</th></tr></thead>
+      <tbody>${materialRows}</tbody>
+    </table>
   </div>` : ""}
 
   <div class="footer">
-    <span>Generated by वास्तु AI · Architectural Design Platform</span>
-    <span>Ref: VASTU-${refNo} · ${date}</span>
+    <span>Generated by Archi AI · Architectural Design Platform</span>
+    <span>Ref: ARCHI-${refNo} · ${date}</span>
     <span>Preliminary estimate — actual costs may vary ±15%</span>
   </div>
+</div>
 </body></html>`;
 
-    const win = window.open('', '_blank');
+    const win = window.open("", "_blank");
     win.document.write(html);
     win.document.close();
     win.focus();
-    setTimeout(() => win.print(), 600);
+    if (doPrint) setTimeout(() => win.print(), 600);
   };
 
   // ── Tab definitions ────────────────────────────────────────────────────────
@@ -1036,8 +1368,141 @@ export default function App() {
   const vastuScore = vastuReport?.score ?? null;
   const costTotal  = costReport?.totalCost ?? null;
 
+  // ── Wizard phase ────────────────────────────────────────────────────────────
+  if (phase === "wizard") {
+    return (
+      <FloorPlanWizard
+        params={params}
+        onParamChange={handleParamChange}
+        onComplete={() => {
+          const mode = params.outputType || "image";
+          setGenMode(mode);
+          htmlAutoOpenRef.current = false;
+          setPhase("generating");
+          if (mode === "image") generateImage();
+          else generate(); // svg and html both run the full SVG pipeline
+        }}
+      />
+    );
+  }
+
+  // ── Generating phase ────────────────────────────────────────────────────────
+  if (phase === "generating") {
+    const isSvg = genMode !== "image"; // html also runs the agent pipeline
+    const pct   = displayPct;
+    return (
+      <div style={{ position:"fixed", inset:0, background:"#06060F", display:"flex", flexDirection:"column", fontFamily:"monospace" }}>
+        {/* Top bar */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 28px", borderBottom:"1px solid #0A0A14" }}>
+          <ArchiLogo size={26} textSize={14} href="/"/>
+          <div style={{ fontSize:9, color:"#333", letterSpacing:"0.12em", textTransform:"uppercase" }}>
+            {isSvg ? "SVG · Agentic Pipeline" : "Image Generation"}
+          </div>
+        </div>
+        {/* Thin top progress stripe */}
+        <div style={{ height:2, background:"#0A0A14" }}>
+          <div style={{ height:"100%", width:`${pct}%`, background:"linear-gradient(90deg,#4488FF,#44DD88)", transition:"width 0.12s linear" }}/>
+        </div>
+
+        {/* Body: left = big progress, right = log */}
+        <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
+
+          {/* Left pane */}
+          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"40px 32px" }}>
+            {/* Big % */}
+            <div style={{ fontSize:80, fontWeight:900, color:"#E8E8F0", lineHeight:1, marginBottom:6, letterSpacing:"-0.04em" }}>
+              {pct}<span style={{ fontSize:26, color:"#333" }}>%</span>
+            </div>
+            <div style={{ fontSize:11, color:"#4488FF", letterSpacing:"0.16em", textTransform:"uppercase", marginBottom:8 }}>
+              {isSvg ? currentAgentLabel : "Generating floor plan image…"}
+            </div>
+            {/* Elapsed + ETA */}
+            <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:28, fontSize:9, fontFamily:"monospace" }}>
+              <span style={{ color:"#333" }}>
+                elapsed <span style={{ color:"#555" }}>{elapsedSec}s</span>
+              </span>
+              <span style={{ color:"#1A1A2A" }}>·</span>
+              <span style={{ color:"#333" }}>
+                est. remaining{" "}
+                <span style={{ color:"#555" }}>
+                  {pct < 5 ? "~30s" :
+                   pct < 38 ? `~${Math.max(5, Math.round((38 - pct) / 0.75))}s` :
+                   pct < 60 ? `~${Math.max(5, Math.round(30 - elapsedSec))}s` :
+                   pct < 85 ? `~${Math.max(3, Math.round(15 - (elapsedSec - 30)))}s` :
+                   "almost done…"}
+                </span>
+              </span>
+            </div>
+
+            {/* Fat progress bar */}
+            <div style={{ width:"100%", maxWidth:480, height:7, background:"#0A0A14", borderRadius:4, overflow:"hidden", marginBottom:40 }}>
+              <div style={{ height:"100%", width:`${pct}%`, background:"linear-gradient(90deg,#4488FF,#44DD88)", transition:"width 0.12s linear", borderRadius:4 }}/>
+            </div>
+
+            {/* Agent pills */}
+            {isSvg && (
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8, justifyContent:"center", maxWidth:500 }}>
+                {AGENT_ORDER.map(id => {
+                  const st = agentStatuses[id] || "idle";
+                  const col = st === "done" ? "#44DD88" : st === "running" ? "#4488FF" : "#222";
+                  return (
+                    <div key={id} style={{
+                      padding:"5px 12px", borderRadius:20,
+                      border:`1px solid ${col}55`,
+                      background: st === "running" ? "#0A1830" : "transparent",
+                      fontSize:9, color: st === "done" ? "#44DD88" : st === "running" ? "#CCC" : "#333",
+                      transition:"all 0.3s",
+                    }}>
+                      {st === "done" ? "✓ " : st === "running" ? "● " : "○ "}
+                      {AGENT_LABELS[id]}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Fun fact card */}
+            <div style={{
+              marginTop:36, maxWidth:480, width:"100%",
+              padding:"16px 20px",
+              background:"#0A0A18", border:"1px solid #1A1A2A", borderRadius:8,
+              opacity: factVisible ? 1 : 0,
+              transform: factVisible ? "translateY(0)" : "translateY(6px)",
+              transition:"opacity 0.4s ease, transform 0.4s ease",
+            }}>
+              <div style={{ fontSize:8, color:"#333", letterSpacing:"0.16em", textTransform:"uppercase", marginBottom:8 }}>
+                ── Did you know ──
+              </div>
+              <div style={{ fontSize:11, color:"#666", lineHeight:1.65, fontStyle:"italic" }}>
+                {FUN_FACTS[factIndex]}
+              </div>
+            </div>
+          </div>
+
+          {/* Right pane: live log */}
+          <div style={{ width:300, borderLeft:"1px solid #0A0A14", display:"flex", flexDirection:"column", overflow:"hidden", background:"#040410" }}>
+            <div style={{ padding:"12px 16px", borderBottom:"1px solid #0A0A14" }}>
+              <div style={{ fontSize:8, color:"#333", letterSpacing:"0.18em", textTransform:"uppercase" }}>── Live Agent Log ──</div>
+            </div>
+            <div style={{ flex:1, overflowY:"auto", padding:"10px 14px", display:"flex", flexDirection:"column", gap:3 }}>
+              {log.length === 0 ? (
+                <div style={{ fontSize:9, color:"#333" }}>Initializing agents…</div>
+              ) : log.map((l, i) => (
+                <div key={i} style={{
+                  fontSize:9, lineHeight:1.55,
+                  color: l.includes("✓") ? "#44DD88" : l.includes("✗") ? "#FF5544" : l.includes("⚠") ? "#FFAA22" : "#444",
+                }}>{l}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display:"flex", height:"100vh", background:"#080814", color:"#D8D8EC", overflow:"hidden" }}>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.55}}`}</style>
 
       {/* Toast notification */}
       {notification && (
@@ -1063,24 +1528,72 @@ export default function App() {
         }}/>
       )}
 
-      {/* ── Left Sidebar ── */}
-      <div style={isMobile ? {
-        position:'fixed', top:0, left:0, bottom:0, zIndex:99,
-        transform: mobileDrawer==='left' ? 'translateX(0)' : 'translateX(-100%)',
-        transition:'transform 0.25s ease',
-      } : {}}>
-        <Sidebar
-          params={params}
-          onParamChange={handleParamChange}
-          onGenerate={() => { genMode === "image" ? generateImage() : generate(); setMobileDrawer(null); }}
-          onGenerateAlts={generateAlts}
-          onExportSVG={exportSVG}
-          onExportPNG={exportPNG}
-          generating={generating}
-          hasPlan={!!svgCode}
-          regErrors={regErrors}
-        />
-      </div>
+      {/* ── Input Overview Drawer (hamburger) ── */}
+      {showInputOverview && (
+        <div style={{
+          position:'fixed', top:0, left:0, bottom:0, zIndex:200,
+          display:"flex",
+        }}>
+          <div style={{
+            width:260, background:"#080814", borderRight:"2px solid #1A1A28",
+            display:"flex", flexDirection:"column", overflow:"hidden",
+            fontFamily:"monospace",
+          }}>
+            {/* Drawer header */}
+            <div style={{ padding:"14px 16px", borderBottom:"2px solid #1A1A28", background:"#060610", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <div style={{ fontSize:9, color:"#555", letterSpacing:"0.16em", textTransform:"uppercase" }}>── Inputs Overview ──</div>
+              <button onClick={() => setShowInputOverview(false)} style={{
+                background:"transparent", border:"none", color:"#555",
+                fontSize:16, cursor:"pointer", padding:"0 4px", lineHeight:1,
+              }}>✕</button>
+            </div>
+            {/* Params summary */}
+            <div style={{ flex:1, overflowY:"auto", padding:14, display:"flex", flexDirection:"column", gap:10 }}>
+              {[
+                { label:"City", value:params.city },
+                { label:"Belief", value:{ vastu:"Vastu Shastra", islamic:"Islāmī Mīmārī", christian:"Sacred Christian", universal:"Universal" }[params.belief] || params.belief },
+                { label:"Plot", value:`${params.plotW} × ${params.plotH} ft (${params.plotW * params.plotH} sqft)` },
+                { label:"Facing", value:params.facing },
+                { label:"BHK", value:`${params.bhk} BHK` },
+                { label:"Floors", value:params.floors === 1 ? "Ground Only" : params.floors === 2 ? "G + 1" : "G + 2" },
+                { label:"Budget", value:params.budget },
+                { label:"Output", value:{ image:"🖼 Image", svg:"⟨/⟩ SVG", html:"📄 HTML Report" }[params.outputType] || params.outputType },
+              ].map(r => (
+                <div key={r.label} style={{ display:"flex", justifyContent:"space-between", gap:8, fontSize:10, borderBottom:"1px solid #0A0A14", paddingBottom:7 }}>
+                  <span style={{ color:"#444", letterSpacing:"0.06em" }}>{r.label}</span>
+                  <span style={{ color:"#CCC", textAlign:"right", maxWidth:150 }}>{r.value}</span>
+                </div>
+              ))}
+              {/* Features */}
+              <div style={{ fontSize:8, color:"#333", letterSpacing:"0.14em", textTransform:"uppercase", marginTop:4 }}>Features</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
+                {[
+                  params.hasParking && `🚗 Parking ×${params.parkingCount}`,
+                  params.hasBalcony && "🛗 Balcony",
+                  params.hasPujaRoom !== false && "🪔 Puja",
+                  params.hasDining !== false && "🍽 Dining",
+                  params.hasStudy && "📚 Study",
+                  params.hasStore !== false && "📦 Store",
+                  params.hasUtility !== false && "🧺 Utility",
+                ].filter(Boolean).map(f => (
+                  <span key={f} style={{ fontSize:9, color:"#44DD88", background:"#0A1810", border:"1px solid #44DD8822", borderRadius:4, padding:"2px 7px" }}>{f}</span>
+                ))}
+              </div>
+            </div>
+            {/* Reconfigure button */}
+            <div style={{ padding:"12px 14px", borderTop:"2px solid #1A1A28" }}>
+              <button onClick={() => { setShowInputOverview(false); setReportReady(false); try { sessionStorage.removeItem("archi_plan"); } catch {} setPhase("wizard"); }} style={{
+                width:"100%", padding:"8px", background:"transparent",
+                border:"1px solid #4488FF44", borderRadius:5,
+                color:"#4488FF", fontSize:10, cursor:"pointer",
+                fontFamily:"monospace", letterSpacing:"0.06em",
+              }}>← Reconfigure</button>
+            </div>
+          </div>
+          {/* Backdrop */}
+          <div onClick={() => setShowInputOverview(false)} style={{ flex:1, background:"rgba(0,0,0,0.5)" }}/>
+        </div>
+      )}
 
       {/* ── Main content ── */}
       <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", minWidth:0 }}>
@@ -1095,12 +1608,35 @@ export default function App() {
           overflowX:"auto",
           flexShrink:0,
         }}>
-          {/* Mobile: hamburger for left sidebar */}
-          {isMobile && (
-            <button onClick={() => setMobileDrawer(d => d==='left' ? null : 'left')} style={{
-              padding:"0 12px", background:"transparent", border:"none",
-              color:"#666", fontSize:18, cursor:"pointer", flexShrink:0,
-            }}>☰</button>
+          {/* Hamburger — show input overview */}
+          <button onClick={() => setShowInputOverview(v => !v)} title="View inputs" style={{
+            padding:"0 14px", background:"transparent", border:"none",
+            borderRight:"1px solid #1A1A28",
+            color:"#555", fontSize:16, cursor:"pointer", flexShrink:0,
+            transition:"color 0.15s",
+          }}
+          onMouseEnter={e => e.currentTarget.style.color="#4488FF"}
+          onMouseLeave={e => e.currentTarget.style.color="#555"}
+          >☰</button>
+
+          {/* HTML report CTA — shown after HTML-mode generation */}
+          {reportReady && (
+            <button
+              onClick={() => {
+                exportPDF({ title:`${params.plotW}×${params.plotH}ft ${params.bhk}BHK Analysis Report`, arch:"Archi AI Studio", print: false });
+              }}
+              style={{
+                padding:"0 16px", background:"transparent",
+                border:"none", borderRight:"1px solid #1A1A2A",
+                color:"#CC66FF", fontSize:10, fontWeight:700,
+                cursor:"pointer", fontFamily:"monospace",
+                letterSpacing:"0.06em", flexShrink:0,
+                display:"flex", alignItems:"center", gap:6,
+                animation:"pulse 2s ease-in-out infinite",
+              }}
+            >
+              <span style={{ fontSize:13 }}>↗</span> VIEW REPORT
+            </button>
           )}
 
           {TABS.map((t, idx) => t.type === "sep"
@@ -1123,37 +1659,6 @@ export default function App() {
               }}>{t.label}</button>
           )}
 
-          {/* Generation mode toggle */}
-          <div style={{
-            marginLeft:"auto", display:"flex", alignItems:"center",
-            background:"#0a0a1a", border:"1px solid #1e1e3a",
-            borderRadius:20, padding:3, gap:2, flexShrink:0,
-          }}>
-            {[
-              { mode:"image", label:"🖼 Image", color:"#44DD88", title:"GPT Image — Primary" },
-              { mode:"svg",   label:"〈/〉 SVG",  color:"#4488FF", title:"Agentic SVG — Beta" },
-            ].map(({ mode, label, color, title }) => (
-              <button
-                key={mode}
-                title={title}
-                onClick={() => { setGenMode(mode); setTab("plan"); }}
-                style={{
-                  padding:"4px 10px", borderRadius:16, border:"none", cursor:"pointer",
-                  fontSize:10, fontFamily:"monospace", fontWeight:700,
-                  background: genMode === mode ? `${color}22` : "transparent",
-                  color:      genMode === mode ? color : "#444",
-                  outline:    genMode === mode ? `1px solid ${color}55` : "none",
-                  transition:"all 0.15s",
-                  whiteSpace:"nowrap",
-                }}
-              >
-                {label}
-                {mode === "image" && <span style={{ marginLeft:4, fontSize:8, opacity:0.7 }}>PRIMARY</span>}
-                {mode === "svg"   && <span style={{ marginLeft:4, fontSize:8, opacity:0.6, color:"#FFAA22" }}>BETA</span>}
-              </button>
-            ))}
-          </div>
-
           {/* Mobile: controls button for right panel */}
           {isMobile && (
             <button onClick={() => setMobileDrawer(d => d==='right' ? null : 'right')} style={{
@@ -1169,14 +1674,14 @@ export default function App() {
             <div style={{ position:'relative', height:2, background:'#0A0A18', borderRadius:1, overflow:'hidden' }}>
               <div style={{
                 position:'absolute', left:0, top:0, bottom:0,
-                width:`${progress}%`,
+                width:`${displayPct}%`,
                 background:'linear-gradient(90deg, #4488FF, #44DD88)',
-                transition:'width 0.7s ease',
+                transition:'width 0.15s linear',
               }}/>
             </div>
             <div style={{ display:'flex', justifyContent:'space-between', marginTop:2 }}>
               <span style={{ fontSize:7, color:'#333', fontFamily:'monospace' }}>{currentAgentLabel}</span>
-              <span style={{ fontSize:7, color:'#333', fontFamily:'monospace' }}>{progress}%</span>
+              <span style={{ fontSize:7, color:'#333', fontFamily:'monospace' }}>{displayPct}%</span>
             </div>
           </div>
         )}
@@ -1531,6 +2036,33 @@ export default function App() {
         <div style={{ borderTop: "2px solid #1A1A28", padding: "12px 10px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ fontSize: 8, color: "#333", letterSpacing: "0.18em", textTransform: "uppercase" }}>── Controls ──</div>
 
+          {/* Generation mode toggle */}
+          <div>
+            <div style={{ fontSize: 8, color: "#444", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 5, fontFamily: "monospace" }}>Gen Mode</div>
+            <div style={{ display: "flex", flexDirection:"column", gap: 4 }}>
+              {[
+                { mode:"image", label:"🖼 Image", color:"#44DD88", sub:"AI image" },
+                { mode:"svg",   label:"⟨/⟩ SVG",  color:"#4488FF", sub:"Vector" },
+                { mode:"html",  label:"📄 Report", color:"#CC66FF", sub:"HTML doc" },
+              ].map(({ mode, label, color, sub }) => (
+                <button key={mode} onClick={() => { setGenMode(mode); setTab("plan"); htmlAutoOpenRef.current = false; }}
+                  style={{
+                    width:"100%", padding:"5px 8px", borderRadius:5, border:"none", cursor:"pointer",
+                    fontSize:9, fontFamily:"monospace", fontWeight:700,
+                    background: genMode === mode ? `${color}18` : "transparent",
+                    color:      genMode === mode ? color : "#444",
+                    outline:    genMode === mode ? `1px solid ${color}44` : "1px solid #1A1A2A",
+                    transition:"all 0.15s",
+                    display:"flex", alignItems:"center", justifyContent:"space-between",
+                  }}
+                >
+                  <span>{label}</span>
+                  <span style={{ fontSize:7, opacity:0.6 }}>{sub}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Score badges */}
           {vastuScore !== null && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -1613,6 +2145,22 @@ export default function App() {
               </div>
             )}
           </div>
+
+          {/* Regenerate */}
+          <button
+            onClick={() => { htmlAutoOpenRef.current = false; setPhase("generating"); if (genMode === "image") generateImage(); else generate(); }}
+            disabled={generating}
+            style={{
+              width:"100%", padding:"8px",
+              background: generating ? "#0A0A14" : "linear-gradient(135deg,#1A3A6A,#0E2040)",
+              border: generating ? "1px solid #1A1A2A" : "1px solid #4488FF55",
+              borderRadius:5, color: generating ? "#333" : "#4488FF",
+              fontSize:10, fontWeight:700, cursor: generating ? "default" : "pointer",
+              fontFamily:"monospace", letterSpacing:"0.06em", transition:"all 0.2s",
+            }}
+          >
+            {generating ? "Generating…" : "⚡ Regenerate"}
+          </button>
 
           {/* Action buttons */}
           {svgCode && (

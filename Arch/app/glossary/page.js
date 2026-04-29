@@ -76,7 +76,7 @@ function NavBar() {
         marginRight: "auto",
         letterSpacing: "0.02em",
       }}>
-        वास्तु AI
+        Archi AI
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -474,7 +474,7 @@ export default function GlossaryPage() {
         fontSize: 11,
         color: C.muted,
       }}>
-        वास्तु AI Glossary — {GLOSSARY_TERMS.length} terms across {GLOSSARY_CATEGORIES.length} categories
+        Archi AI Glossary — {GLOSSARY_TERMS.length} terms across {GLOSSARY_CATEGORIES.length} categories
       </footer>
     </div>
   );
