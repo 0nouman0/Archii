@@ -6,9 +6,13 @@ import { isEmbeddingAvailable } from "./embeddings.js";
 import {
   EXAMPLE_LAYOUTS,
   VASTU_ZONE_RULES,
+  VALIDATION_RULES,
+  VALIDATION_RULES_PROMPT,
   buildQueryDocument,
   formatRAGContext,
 } from "./knowledgeBase.js";
+
+export { VALIDATION_RULES, VALIDATION_RULES_PROMPT };
 
 // ─── Keyword-based fallback retrieval from static examples ───────────────────
 function keywordRetrieve(params, topK = 3) {

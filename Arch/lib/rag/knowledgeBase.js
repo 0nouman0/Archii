@@ -258,6 +258,58 @@ export function getMaxFloors(params) {
   };
 }
 
+// ─── Architectural Validation Rules (R01–R51) ─────────────────────────────────
+// Parsed from dataset_metadata v1.0 — 21 curated rules across 9 categories.
+// action_on_violation: "reject" = hard constraint | "penalty" = soft constraint | "cost_penalty" / "cultural_penalty" = advisory
+export const VALIDATION_RULES = [
+  // ── Geometry ──────────────────────────────────────────────────────────────
+  { id:"R01", cat:"Geometry",     action:"reject",           rule:"Room aspect ratio (short/long wall) must be ≥ 0.5625 (no corridor-thin rooms)." },
+  { id:"R02", cat:"Geometry",     action:"reject",           rule:"Room length-to-width ratio must be ≤ 2.0; layouts with any room > 2.5 are rejected outright." },
+  { id:"R03", cat:"Geometry",     action:"penalty",          rule:"Furniture bounding boxes must not exceed 40% of their room's floor area (60/40 spatial efficiency rule)." },
+  { id:"R04", cat:"Geometry",     action:"reject",           rule:"Every habitable room must be ≥ 7 ft in its shortest dimension. Exempt: kitchen, bathroom, utility, closet." },
+  // ── Hierarchy ─────────────────────────────────────────────────────────────
+  { id:"R07", cat:"Hierarchy",    action:"penalty",          rule:"Primary bedroom must have greater area than every secondary bedroom." },
+  { id:"R08", cat:"Hierarchy",    action:"reject",           rule:"Minimum floor areas: primary living ≥ 144 sqft, medium living ≥ 216 sqft, guest bedroom ≥ 120 sqft." },
+  // ── Circulation ───────────────────────────────────────────────────────────
+  { id:"R12", cat:"Circulation",  action:"reject",           rule:"Corridors must be 36–60 inches wide. Optimal range 42–48 inches." },
+  { id:"R13", cat:"Circulation",  action:"penalty",          rule:"No more than 4 doors may open onto a single linear corridor segment." },
+  { id:"R14", cat:"Circulation",  action:"reject",           rule:"Dead-end corridor segments must not exceed 20 ft in length." },
+  // ── Zoning ────────────────────────────────────────────────────────────────
+  { id:"R20", cat:"Zoning",       action:"penalty",          rule:"Acoustic buffer required between sleep zones (bedroom, primary bath) and active zones (living, kitchen, dining). They must not share a wall without insulation." },
+  { id:"R21", cat:"Zoning",       action:"reject",           rule:"Bathrooms and powder rooms must NOT be directly adjacent (door-connected) to kitchen, dining room, or living room." },
+  // ── Vastu ─────────────────────────────────────────────────────────────────
+  { id:"R26", cat:"Vastu",        action:"cultural_penalty", rule:"Kitchen must be placed in SE (South-East) or NW (North-West) quadrant. Placement outside these zones is a cultural violation." },
+  { id:"R28", cat:"Vastu",        action:"cultural_penalty", rule:"Bathroom/toilet must NOT be placed in the NE (North-East) quadrant. Toilet seat axis must align North–South." },
+  // ── Ergonomics ────────────────────────────────────────────────────────────
+  { id:"R30", cat:"Ergonomics",   action:"penalty",          rule:"Kitchen work triangle (stove–sink–refrigerator): each leg must be 4–9 ft. Triangle perimeter must stay 13–26 ft." },
+  { id:"R33", cat:"Ergonomics",   action:"reject",           rule:"Minimum 30-inch frontal clearance in front of every bathroom fixture (sink, toilet, tub/shower)." },
+  { id:"R34", cat:"Ergonomics",   action:"reject",           rule:"Toilet centerline must have ≥ 15 inches lateral clearance to each side wall (18 inches optimal)." },
+  { id:"R35", cat:"Ergonomics",   action:"reject",           rule:"Door swing arcs must not intersect any fixture, furniture footprint, or standing zone. Zero overlap allowed." },
+  // ── Structural ────────────────────────────────────────────────────────────
+  { id:"R37", cat:"Structural",   action:"cost_penalty",     rule:"Load-bearing walls on upper floors must stack within 12 inches of load-bearing walls below. Misalignment requires a transfer beam (cost penalty)." },
+  // ── Plumbing ──────────────────────────────────────────────────────────────
+  { id:"R42", cat:"Plumbing",     action:"cost_penalty",     rule:"Bathroom, kitchen, and utility rooms should share wet walls where possible to minimise plumbing run lengths and cost." },
+  // ── Fenestration ──────────────────────────────────────────────────────────
+  { id:"R46", cat:"Fenestration", action:"reject",           rule:"Total glazing area per room must be ≥ 8% of that room's floor area (natural light minimum)." },
+  // ── ADA ───────────────────────────────────────────────────────────────────
+  { id:"R51", cat:"ADA",          action:"penalty",          rule:"Pull-type doors require ≥ 18 inches of clear latch-side wall space for wheelchair approach." },
+];
+
+// Human-readable block for prompt injection
+export const VALIDATION_RULES_PROMPT = (() => {
+  const byCategory = {};
+  for (const r of VALIDATION_RULES) {
+    if (!byCategory[r.cat]) byCategory[r.cat] = [];
+    byCategory[r.cat].push(`  [${r.id}|${r.action.toUpperCase()}] ${r.rule}`);
+  }
+  const lines = ["ARCHITECTURAL VALIDATION RULES (must be satisfied before finalising any layout):"];
+  for (const [cat, items] of Object.entries(byCategory)) {
+    lines.push(`\n${cat}:`);
+    lines.push(...items);
+  }
+  return lines.join("\n");
+})();
+
 // ─── Build a rich text document for a retrieval query ─────────────────────────
 export function buildQueryDocument(params) {
   const { plotW, plotH, bhk, facing, belief = 'vastu', city } = params;
@@ -295,7 +347,13 @@ ${STAIRCASE_RULES}
 
 HIGH-SCORING REFERENCE EXAMPLES:
 ${examples}
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${VALIDATION_RULES_PROMPT}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REJECT actions are hard constraints — violating them makes the layout invalid.
+PENALTY actions are soft constraints — violations lower the plan score but do not block generation.
+Apply ALL rules above before finalising any room positions, dimensions, or adjacencies.
 Apply the zone map and door/window rules STRICTLY. The reference examples show what a 90+ scoring plan looks like.
 `;
 }
