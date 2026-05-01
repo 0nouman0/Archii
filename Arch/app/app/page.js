@@ -341,7 +341,17 @@ async function callRefinementLoop(params, layout, vastuReport, ragContext) {
 }
 
 // ─── Agent pipeline constants ─────────────────────────────────────────────────
-const AGENT_ORDER = ['input','spatial','rag','svg','vastu','cost','furniture'];
+const AGENT_ORDER  = ['input','spatial','rag','svg','vastu','cost','furniture'];
+const AGENT_LABELS = {
+  input:     "INPUT PARSER",
+  spatial:   "SPATIAL PLANNER",
+  rag:       "RAG CONTEXT",
+  svg:       "SVG RENDERER",
+  vastu:     "VASTU CRITIC",
+  cost:      "COST ESTIMATOR",
+  furniture: "FURNITURE AI",
+};
+
 const AGENT_WEIGHTS = { input:5, spatial:5, rag:10, svg:35, vastu:15, cost:15, furniture:15 };
 
 const FUN_FACTS = [
