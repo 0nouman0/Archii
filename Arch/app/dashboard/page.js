@@ -78,12 +78,12 @@ export default function Dashboard() {
         padding:"14px 24px", borderBottom:"2px solid #1A1A28",
         background:"#060610", position:"sticky", top:0, zIndex:10,
       }}>
-        <div style={{ display:"flex", alignItems:"baseline", gap:6 }}>
-          <a href="/" style={{ textDecoration:"none" }}>
-            <span style={{ fontSize:18, color:"#E8E8F4", fontFamily:"Georgia,serif" }}>वास्तु</span>
-            <span style={{ fontSize:18, color:"#F0E040", fontFamily:"Georgia,serif", fontWeight:700 }}> AI</span>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <a href="/" style={{ textDecoration:"none", display:"flex", alignItems:"center", gap:7 }}>
+            <svg width="22" height="22" viewBox="0 0 28 28" fill="none"><rect x="0.75" y="0.75" width="26.5" height="26.5" rx="4" stroke="#4488FF" strokeWidth="1" fill="none" opacity="0.35"/><rect x="5" y="15" width="4" height="9" fill="#4488FF" rx="0.5"/><rect x="19" y="15" width="4" height="9" fill="#4488FF" rx="0.5"/><path d="M5 15.5 Q14 4 23 15.5" fill="none" stroke="#44DD88" strokeWidth="2.2" strokeLinecap="round"/><circle cx="14" cy="5.2" r="2.1" fill="#E8E8F0"/></svg>
+            <span style={{ fontSize:15, fontWeight:900, color:"#E8E8F0", fontFamily:"monospace", letterSpacing:"0.06em" }}>ARCHI<span style={{ color:"#4488FF" }}>AI</span></span>
           </a>
-          <span style={{ fontSize:8, color:"#333", letterSpacing:"0.14em", marginLeft:8 }}>DASHBOARD</span>
+          <span style={{ fontSize:8, color:"#333", letterSpacing:"0.14em" }}>DASHBOARD</span>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <span style={{ fontSize:9, color:"#444" }}>{user?.email}</span>

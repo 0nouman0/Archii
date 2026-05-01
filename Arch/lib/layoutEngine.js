@@ -299,6 +299,91 @@ const T = {
   ],
 };
 
+// ─── Adjust room list based on user feature preferences ───────────────────────
+function adjustRooms(rooms, params, innerW, innerH) {
+  const {
+    hasParking, parkingCount = 0,
+    hasBalcony, hasPujaRoom = true, hasDining = true,
+    hasStudy, hasStore = true, hasUtility = true,
+    attachedBaths = "master", // "all" | "master" | "none"
+  } = params;
+
+  let result = [...rooms];
+
+  // Remove puja room if not wanted — absorb into living/corridor
+  if (hasPujaRoom === false) {
+    result = result.filter(r => r.name !== "Puja");
+  }
+
+  // Remove dining if not wanted (open-plan) — absorb into living
+  if (hasDining === false) {
+    result = result.filter(r => r.name !== "Dining");
+  }
+
+  // Remove store if not wanted
+  if (hasStore === false) {
+    result = result.filter(r => r.name !== "Store");
+  }
+
+  // Remove utility if not wanted
+  if (hasUtility === false) {
+    result = result.filter(r => r.name !== "Utility");
+  }
+
+  // Add study room — replace Store slot if store was removed, else shrink corridor
+  if (hasStudy === true && !result.find(r => r.name === "Study")) {
+    const corridor = result.find(r => r.name === "Corridor");
+    if (corridor && corridor.wp > 0.18) {
+      const studyWp = 0.12;
+      result = result.map(r =>
+        r.name === "Corridor"
+          ? { ...r, wp: r.wp - studyWp }
+          : r
+      );
+      result.push({ ...corridor, name: "Study", xp: corridor.xp + corridor.wp - studyWp, wp: studyWp, vastu: "NW" });
+    }
+  }
+
+  // Add balcony — attach to master bedroom (top edge) if floors > 1
+  if (hasBalcony === true && (params.floors || 1) > 1) {
+    const master = result.find(r => r.name === "Master Bed");
+    if (master && !result.find(r => r.name === "Balcony")) {
+      const balcHp = 0.08;
+      result = result.map(r =>
+        r.name === "Master Bed" ? { ...r, hp: r.hp - balcHp, yp: r.yp + balcHp } : r
+      );
+      result.push({ name: "Balcony", xp: master.xp, yp: master.yp, wp: master.wp, hp: balcHp, vastu: "SW" });
+    }
+  }
+
+  // Add car porch — append at front boundary (same facing side as entrance)
+  if (hasParking === true && parkingCount > 0 && !result.find(r => r.name === "Car Porch")) {
+    result.push({ name: "Car Porch", xp: 0.60, yp: 0.00, wp: 0.20 * Math.min(parkingCount, 2), hp: 0.10, vastu: "NW" });
+  }
+
+  // Attached bathrooms for all bedrooms (add Master Bath if missing)
+  if (attachedBaths === "all") {
+    const hasMasterBath = result.find(r => r.name === "Master Bath");
+    if (!hasMasterBath) {
+      const master = result.find(r => r.name === "Master Bed");
+      if (master) {
+        const bathWp = 0.10;
+        result = result.map(r =>
+          r.name === "Master Bed" ? { ...r, wp: r.wp - bathWp } : r
+        );
+        const masterAfter = result.find(r => r.name === "Master Bed");
+        if (masterAfter) {
+          result.push({ name: "Master Bath", xp: masterAfter.xp + masterAfter.wp, yp: masterAfter.yp, wp: bathWp, hp: masterAfter.hp, vastu: "SW" });
+        }
+      }
+    }
+  } else if (attachedBaths === "none") {
+    result = result.filter(r => r.name !== "Master Bath");
+  }
+
+  return result;
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 export function computeLayout(params) {
   const { plotW, plotH, bhk, facing } = params;
@@ -337,7 +422,8 @@ export function computeLayout(params) {
   const key = `${bhk}BHK_${facing}`;
   const template = T[key] || T["3BHK_North"];
 
-  const rooms = template.map(r => {
+  const adjustedTemplate = adjustRooms(template, params, innerW, innerH);
+  const rooms = adjustedTemplate.map(r => {
     const x = Math.round(innerX + r.xp * innerW);
     const y = Math.round(innerY + r.yp * innerH);
     const w = Math.round(r.wp * innerW);

@@ -187,30 +187,137 @@ function CatBadge({ cat }) {
   );
 }
 
+// ─── Plan Overlay ──────────────────────────────────────────────────────────────
+function PlanOverlay({ item, onClose }) {
+  let layout = null;
+  try {
+    layout = computeLayout({
+      plotW: item.plotW, plotH: item.plotH, bhk: item.bhk,
+      facing: item.facing, city: item.city || "NBC (Generic)",
+      budget: item.budget || "Economy (₹20-40L)", floors: item.floors || 1,
+    });
+  } catch (_) {}
+
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const { rooms, W, H } = layout || { rooms: [], W: 300, H: 400 };
+  const PAD = 16;
+  const vbW = W + PAD * 2;
+  const vbH = H + PAD * 2;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(4,4,12,0.88)", backdropFilter: "blur(8px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: C.surface, border: `1px solid ${C.border}`,
+          borderRadius: 16, overflow: "hidden",
+          maxWidth: 820, width: "100%", maxHeight: "90vh",
+          display: "flex", flexDirection: "column",
+          boxShadow: `0 32px 80px rgba(0,0,0,0.7)`,
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          padding: "16px 20px", borderBottom: `1px solid ${C.border}`,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          background: "#0a0a18", flexShrink: 0,
+        }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: C.text, marginBottom: 3 }}>
+              {item.icon && <span style={{ marginRight: 8 }}>{item.icon}</span>}
+              {item.name}
+            </div>
+            <div style={{ display: "flex", gap: 14, fontFamily: "monospace", fontSize: 11, color: C.muted }}>
+              {item.bhk && <span style={{ color: C.blue }}>{item.bhk} BHK</span>}
+              {item.plotW && <span>{item.plotW}×{item.plotH} ft</span>}
+              {item.facing && <span>{item.facing}-facing</span>}
+              {item.area && <span>{item.area.toLocaleString()} sqft</span>}
+              {item.vastuScore && <span style={{ color: C.green }}>Vastu {item.vastuScore}</span>}
+              {item.estCost && <span style={{ color: C.yellow }}>{item.estCost}</span>}
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            background: "transparent", border: `1px solid ${C.border}`,
+            borderRadius: 8, color: C.muted, fontSize: 18,
+            width: 34, height: 34, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0, transition: "border-color 0.15s, color 0.15s",
+          }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = C.text; e.currentTarget.style.color = C.text; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.muted; }}
+          >✕</button>
+        </div>
+
+        {/* Large plan */}
+        <div style={{
+          flex: 1, overflow: "auto", background: "#ffffff",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 24, minHeight: 300,
+        }}>
+          {layout ? (
+            <svg
+              viewBox={`${-PAD} ${-PAD} ${vbW} ${vbH}`}
+              style={{ width: "100%", maxWidth: 700, height: "auto", display: "block" }}
+            >
+              <rect x={0} y={0} width={W} height={H} fill="#f5f5f0" stroke="#999" strokeWidth={2} />
+              {rooms.map((r, i) => {
+                const color = r.color || ROOM_COLORS[r.name] || "#D0D0C8";
+                const fs = Math.max(7, Math.min(14, Math.min(r.w, r.h) / 5));
+                const cx = r.x + r.w / 2;
+                const cy = r.y + r.h / 2;
+                return (
+                  <g key={i}>
+                    <rect x={r.x} y={r.y} width={r.w} height={r.h} fill={color} stroke="#fff" strokeWidth={1.5} />
+                    {r.w > 20 && r.h > 14 && (
+                      <>
+                        <text x={cx} y={cy - fs * 0.3} textAnchor="middle" fontSize={fs}
+                          fontFamily="monospace" fill="#111" fontWeight="700">{r.name}</text>
+                        <text x={cx} y={cy + fs * 1.1} textAnchor="middle" fontSize={fs * 0.75}
+                          fontFamily="monospace" fill="#555">{r.ftW}×{r.ftH}ft</text>
+                      </>
+                    )}
+                  </g>
+                );
+              })}
+              {/* North arrow */}
+              <text x={W - 4} y={14} textAnchor="end" fontSize={10} fontFamily="monospace" fill="#333" fontWeight="700">N↑</text>
+              {/* Dimension labels */}
+              <text x={W / 2} y={-4} textAnchor="middle" fontSize={9} fontFamily="monospace" fill="#666">← {item.plotW} ft →</text>
+              <text x={-4} y={H / 2} textAnchor="middle" fontSize={9} fontFamily="monospace" fill="#666"
+                transform={`rotate(-90,${-4},${H / 2})`}>{item.plotH} ft</text>
+            </svg>
+          ) : (
+            <div style={{ color: C.muted, fontFamily: "monospace", fontSize: 13 }}>Preview unavailable</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Preset Card ───────────────────────────────────────────────────────────────
-function PresetCard({ item }) {
+function PresetCard({ item, onSelect }) {
   const [hovered, setHovered] = useState(false);
-
-  function loadInStudio() {
-    const params = {
-      plotW:  item.plotW,
-      plotH:  item.plotH,
-      bhk:    item.bhk,
-      facing: item.facing,
-      city:   item.city,
-      budget: item.budget,
-      floors: item.floors,
-    };
-    // encodeURIComponent handles non-Latin chars like ₹ that btoa can't encode
-    const hash = btoa(encodeURIComponent(JSON.stringify(params)));
-    window.location.href = `/app#${hash}`;
-  }
-
   const isArchetype = item.category === "archetype";
   const isShape     = item.category === "shape";
 
   return (
     <div
+      onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -221,9 +328,9 @@ function PresetCard({ item }) {
         display: "flex",
         flexDirection: "column",
         transition: "border-color 0.18s, background 0.18s, transform 0.15s, box-shadow 0.18s",
-        transform: hovered ? "translateY(-2px)" : "none",
-        boxShadow: hovered ? `0 8px 32px ${C.blue}18` : "none",
-        cursor: "default",
+        transform: hovered ? "translateY(-3px)" : "none",
+        boxShadow: hovered ? `0 8px 32px ${C.blue}22` : "none",
+        cursor: "pointer",
       }}
     >
       {/* Mini floor plan */}
@@ -328,51 +435,24 @@ function PresetCard({ item }) {
           ))}
         </ul>
 
-        {/* Footer */}
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginTop: "auto",
-          paddingTop: 8,
-          borderTop: `1px solid ${C.border}`,
-        }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {/* Footer: cost + vastu score */}
+        {(item.estCost || item.vastuScore) && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10,
+            marginTop: "auto", paddingTop: 8,
+            borderTop: `1px solid ${C.border}`,
+          }}>
             {item.estCost && (
               <span style={{ fontFamily: "monospace", fontSize: 12, color: C.yellow, fontWeight: 700 }}>
                 {item.estCost}
               </span>
             )}
             {item.vastuScore && <ScoreBadge score={item.vastuScore} />}
+            <span style={{ marginLeft: "auto", fontSize: 10, color: C.muted, fontFamily: "monospace" }}>
+              click to expand ↗
+            </span>
           </div>
-          <button
-            onClick={loadInStudio}
-            style={{
-              padding: "7px 14px",
-              background: `${C.blue}18`,
-              color: C.blue,
-              border: `1px solid ${C.blue}50`,
-              borderRadius: 8,
-              fontSize: 12,
-              fontFamily: "monospace",
-              fontWeight: 700,
-              cursor: "pointer",
-              letterSpacing: "0.02em",
-              transition: "background 0.15s, border-color 0.15s",
-              whiteSpace: "nowrap",
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = `${C.blue}35`;
-              e.currentTarget.style.borderColor = `${C.blue}90`;
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background = `${C.blue}18`;
-              e.currentTarget.style.borderColor = `${C.blue}50`;
-            }}
-          >
-            Load in Studio →
-          </button>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -445,7 +525,7 @@ function NavBar() {
         marginRight: "auto",
         letterSpacing: "0.02em",
       }}>
-        वास्तु AI
+        Archi AI
       </div>
 
       {/* Nav links */}
@@ -518,6 +598,7 @@ export default function PresetsPage() {
   const [bhkFilter, setBhkFilter]       = useState("All");
   const [budgetFilter, setBudgetFilter] = useState("All");
   const [facingFilter, setFacingFilter] = useState("All");
+  const [selectedPreset, setSelectedPreset] = useState(null);
 
   // Live data from Supabase; fall back to static while loading
   const [dbStandard,   setDbStandard]   = useState(VASTU_PRESETS);
@@ -560,6 +641,9 @@ export default function PresetsPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "inherit" }}>
+      {selectedPreset && (
+        <PlanOverlay item={selectedPreset} onClose={() => setSelectedPreset(null)} />
+      )}
       <NavBar />
 
       <main style={{ maxWidth: 1280, margin: "0 auto", padding: "32px 24px 60px" }}>
@@ -583,7 +667,7 @@ export default function PresetsPage() {
             lineHeight: 1.5,
           }}>
             Production-ready Vastu-compliant layouts for every plot size, tradition, and budget.
-            Click <span style={{ color: C.blue }}>Load in Studio</span> to open any preset instantly.
+            Click any card to preview the floor plan in detail.
           </p>
         </div>
 
@@ -710,7 +794,7 @@ export default function PresetsPage() {
             gap: 20,
           }}>
             {filtered.map(item => (
-              <PresetCard key={item.id} item={item} />
+              <PresetCard key={item.id} item={item} onSelect={() => setSelectedPreset(item)} />
             ))}
           </div>
         )}
@@ -725,7 +809,7 @@ export default function PresetsPage() {
         fontSize: 11,
         color: C.muted,
       }}>
-        वास्तु AI — {VASTU_PRESETS.length + ARCHETYPES.length + PLOT_SHAPES.length} curated Vastu-compliant floor plans
+        Archi AI — {VASTU_PRESETS.length + ARCHETYPES.length + PLOT_SHAPES.length} curated Vastu-compliant floor plans
       </footer>
     </div>
   );

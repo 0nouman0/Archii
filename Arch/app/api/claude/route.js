@@ -36,7 +36,7 @@ async function tryGemini(systemPrompt, userPrompt, maxTokens) {
   if (!isRealKey(key)) return null;
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: "gemini-2.5-flash",
     systemInstruction: systemPrompt,
     generationConfig: { maxOutputTokens: maxTokens },
   });
@@ -56,7 +56,7 @@ async function tryGroq(systemPrompt, userPrompt, maxTokens) {
   try {
     const completion = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
-      max_tokens: Math.min(maxTokens, 8000), // Groq cap
+      max_tokens: Math.min(maxTokens, 6000),
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -104,35 +104,47 @@ async function tryNemotron(systemPrompt, userPrompt, maxTokens) {
   }
 }
 
-// ─── Fallback orchestrator ────────────────────────────────────────────────────
+// ─── Provider registry ────────────────────────────────────────────────────────
 
-const PROVIDERS = [
-  { name: "Groq (Llama-3.3-70B)",      fn: tryGroq },
-  { name: "Google (Gemini 2.0 Flash)", fn: tryGemini },
-  { name: "NVIDIA (Nemotron/GLM)",     fn: tryNemotron },
-  { name: "Anthropic (Claude Sonnet)", fn: tryAnthropic },
-];
+const PROVIDER_MAP = {
+  anthropic: { name: "Anthropic (Claude Sonnet)", fn: tryAnthropic },
+  gemini:    { name: "Google (Gemini 2.0 Flash)", fn: tryGemini    },
+  groq:      { name: "Groq (Llama-3.3-70B)",      fn: tryGroq      },
+  nvidia:    { name: "NVIDIA (Nemotron/GLM)",      fn: tryNemotron  },
+};
+
+// Default order when no priority is specified
+const DEFAULT_ORDER = ["groq", "gemini", "nvidia", "anthropic"];
+
+function buildProviderChain(priorities = []) {
+  // Start with requested priorities, then append any remaining providers as fallback
+  const seen = new Set(priorities);
+  const rest = DEFAULT_ORDER.filter(k => !seen.has(k));
+  return [...priorities, ...rest]
+    .map(k => PROVIDER_MAP[k])
+    .filter(Boolean);
+}
 
 export async function POST(request) {
   const body = await request.json();
-  // apiKey from body is intentionally ignored — server-side keys only
-  const { systemPrompt, userPrompt, maxTokens = 4000 } = body;
+  const { systemPrompt, userPrompt, maxTokens = 4000, providers } = body;
 
   if (!systemPrompt || !userPrompt) {
     return Response.json({ error: "Missing prompts" }, { status: 400 });
   }
 
+  const chain  = buildProviderChain(providers || []);
   const errors = [];
 
-  for (const { name, fn } of PROVIDERS) {
+  for (const { name, fn } of chain) {
     try {
       const result = await fn(systemPrompt, userPrompt, maxTokens);
       if (result !== null) {
         return Response.json({ text: result, provider: name });
       }
     } catch (err) {
-      const isOverloaded = err.status === 503 || err.message.includes("overloaded") || err.message.includes("rate_limit");
-      console.error(`[AI Fallback] ${name} ${isOverloaded ? "overloaded" : "failed"}:`, err.message);
+      const isOverloaded = err.status === 503 || err.message?.includes("overloaded") || err.message?.includes("rate_limit");
+      console.error(`[AI Shard] ${name} ${isOverloaded ? "overloaded" : "failed"}:`, err.message);
       errors.push(`${name}: ${err.message}`);
     }
   }

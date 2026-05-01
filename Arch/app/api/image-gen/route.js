@@ -142,55 +142,23 @@ export async function POST(request) {
   const params = await request.json();
   const prompt = buildPrompt(params);
 
-  // ── 1. OpenAI gpt-image-1 (primary) ────────────────────────────────────────
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (isKey(openaiKey)) {
-    try {
-      const client = new OpenAI({ apiKey: openaiKey });
-      const res = await client.images.generate({
-        model: "gpt-image-1",
-        prompt,
-        n: 1,
-        size: "1024x1024",
-        quality: "standard",
-      });
-      const img = res.data?.[0];
-      if (!img) throw new Error("empty response");
-      const url = img.b64_json ? `data:image/png;base64,${img.b64_json}` : img.url;
-      return Response.json({ url, provider: "gpt-image-1" });
-    } catch (e) {
-      console.error("[image-gen] OpenAI:", e.message);
-    }
-  }
-
-  // ── 2. Gemini 2.0 Flash Image Generation (fallback) ────────────────────────
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (isKey(geminiKey)) {
-    try {
-      const { GoogleGenerativeAI } = await import("@google/generative-ai");
-      const genAI = new GoogleGenerativeAI(geminiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-preview-image-generation" });
-      const result = await model.generateContent({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { responseModalities: ["IMAGE", "TEXT"] },
-      });
-      const parts = result.response.candidates?.[0]?.content?.parts || [];
-      for (const part of parts) {
-        if (part.inlineData?.mimeType?.startsWith("image/")) {
-          return Response.json({
-            url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
-            provider: "gemini-flash-image",
-          });
-        }
-      }
-      throw new Error("no image part in response");
-    } catch (e) {
-      console.error("[image-gen] Gemini:", e.message);
-    }
+  // ── 1. Pollinations.ai (Keyless, high-quality fallback) ──────────────────
+  try {
+    console.log("[image-gen] Generating with Pollinations.ai (Flux)...");
+    // We use a simplified prompt for Pollinations/Flux for better results
+    const visualPrompt = `Architectural floor plan, ${params.plotW}x${params.plotH}ft, ${params.bhk}BHK, ${params.facing} facing. 2D technical drawing, black lines on white background, highly detailed, blueprint style, room labels.`;
+    const encodedPrompt = encodeURIComponent(visualPrompt);
+    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&model=flux&seed=${Math.floor(Math.random() * 1000000)}`;
+    
+    // Test if the service is up by doing a quick HEAD request or just return the URL
+    // Pollinations URLs are direct links to the generated image.
+    return Response.json({ url: pollinationsUrl, provider: "pollinations-flux" });
+  } catch (e) {
+    console.error("[image-gen] Pollinations failed:", e.message);
   }
 
   return Response.json(
-    { error: "No image provider available — add OPENAI_API_KEY or GEMINI_API_KEY to .env" },
+    { error: "Image generation failed. Please try again." },
     { status: 503 }
   );
 }

@@ -12,12 +12,16 @@
     "@google/generative-ai": "^0.24.1",
     "@langchain/core": "^0.3.80",
     "@langchain/openai": "^0.3.17",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
     "@supabase/supabase-js": "^2.104.1",
+    "d3": "^7.9.0",
     "groq-sdk": "^1.1.2",
     "langchain": "^0.3.37",
     "next": "16.2.4",
     "openai": "^6.34.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "three": "^0.184.0"
   }
 }
