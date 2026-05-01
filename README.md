@@ -1,5 +1,5 @@
 # 🏗️ Archii (वास्तु AI)
-
+![Archii Hero](public/assets/hero.png)
 
 ### AI-Powered Architectural Design & Vastu Shastra Platform
 
