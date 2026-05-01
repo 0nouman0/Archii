@@ -17,7 +17,8 @@ export function buildFloorPlanSVGPromptWithRAG(params, layout, strategy = "", ra
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ## VASTU ZONE ENFORCEMENT (MANDATORY)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-These zones are PRE-COMPUTED and CORRECT. Do NOT move rooms to different zones:
+These zones are PRE-COMPUTED as a baseline.
+IMPORTANT: If the Refinement Instructions or Vastu rules conflict with the (x,y) coordinates provided below, you MUST DISREGARD the coordinates and move the rooms to the correct zone.
 ${zoneEnforcement}
 
 CRITICAL VASTU RULES for ${params.facing}-facing layout:
@@ -90,13 +91,42 @@ Place windows on EXTERIOR walls only, per vastu:
   • Do NOT place windows on walls shared between two rooms
 `;
 
+  // Adjacency & Flow rules (from graph/roomAdjacency.js logic)
+  const adjacencySection = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## ADJACENCY & FLOW (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Follow these room-to-room connectivity rules:
+  • Kitchen MUST be adjacent to Dining (direct service flow)
+  • Master Bed MUST have an attached Master Bath (ensuite access)
+  • All Bedrooms SHOULD be accessible via a central Corridor
+  • Kitchen MUST be separated from Puja (fire vs sacred zone)
+  • Toilet/Bathroom MUST be separated from Kitchen (hygiene rule)
+  • Puja MUST NOT be adjacent to any Bathroom/Toilet
+`;
+
+  // Extended vocabulary (from DeepFloorplan)
+  const vocabSection = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## ARCHITECTURAL VOCABULARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+You may use these expanded room types if they fit the design:
+  • Study / Home Office (N or E zone)
+  • Guest Room (NW or W zone)
+  • Servant Quarter (SE or NW corner, separate entry)
+  • Utility / Laundry (NW service zone)
+  • Store Room (SW or S zone)
+  • Balcony / Verandah (N or E for morning light)
+`;
+
   // Cap RAG section to avoid blowing past Groq's 12K TPM limit
   const ragTrimmed = ragSection.length > 1500
     ? ragSection.slice(0, 1500) + "\n...[truncated for token limit]\n"
     : ragSection;
 
-  return basePrompt + zoneSection + topologySection + windowSection + staircaseSection + ragTrimmed + refineSection;
+  return basePrompt + zoneSection + adjacencySection + vocabSection + topologySection + windowSection + staircaseSection + ragTrimmed + refineSection;
 }
+
 
 export function buildFloorPlanSVGPrompt(params, layout, strategy = "") {
   const { plotW, plotH, bhk, city, facing, budget } = params;

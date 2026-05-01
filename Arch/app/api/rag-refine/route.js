@@ -5,33 +5,16 @@
 // POST body:
 //   params:      { plotW, plotH, bhk, facing, city, budget, belief, floors }
 //   layout:      computed layout from layoutEngine
-//   vastuReport: current vastu report (with score + violations)
-//   ragContext:  formatted RAG context string
-
-import Anthropic from "@anthropic-ai/sdk";
 import { computeLayout } from "../../../lib/layoutEngine.js";
 import { scoreVastuLayout } from "../../../lib/vastuRules.js";
 import { buildFloorPlanSVGPromptWithRAG } from "../../../lib/prompts.js";
 import { retrieveRAGContext, buildRefinementHint } from "../../../lib/rag/retriever.js";
+import { callAI } from "../../../lib/ai-provider.js";
 
 const MAX_ITERATIONS = 2;
 const SCORE_TARGET   = 75;
 
-// ─── LangGraph-style state machine (manual impl, no external dep needed) ─────
-// Nodes: retrieve → generate → evaluate → (refine → generate → evaluate)* → end
-
-async function callClaude(systemPrompt, userPrompt, maxTokens = 8000) {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key || key.includes("...")) throw new Error("ANTHROPIC_API_KEY not configured");
-  const client = new Anthropic({ apiKey: key });
-  const msg = await client.messages.create({
-    model: "claude-sonnet-4-5",
-    max_tokens: maxTokens,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userPrompt }],
-  });
-  return msg.content[0]?.text || "";
-}
+// ─── LangGraph-style state machine ───────────────────────────────────────────
 
 function parseJSON(raw) {
   try { return JSON.parse(raw.replace(/```json|```/g, "").trim()); }
@@ -51,12 +34,16 @@ async function nodeGenerate(state) {
     : `Refinement attempt ${iteration} — fixing violations from previous attempt`;
 
   const svgPrompt = buildFloorPlanSVGPromptWithRAG(params, layout, strategy, ragContext, refinementHint);
-  const raw = await callClaude(
+  
+  // Use multi-provider AI call
+  const { text, provider } = await callAI(
     "You are a world-class architectural SVG drafter. Output ONLY raw SVG — no markdown, no explanation. Start with <svg and end with </svg>.",
     svgPrompt,
     8000
   );
-  const svgCode = extractSVG(raw);
+
+  console.log(`[rag-refine] Generated via ${provider}`);
+  const svgCode = extractSVG(text);
   return { ...state, svgCode };
 }
 
@@ -65,28 +52,55 @@ async function nodeEvaluate(state) {
   const { params, layout, svgCode } = state;
   const { buildBeliefCriticPrompt, buildBeliefContext } = await import("../../../lib/prompts.js");
   const { getVastuRemedies } = await import("../../../lib/vastuRules.js");
+  const { analyzeLayoutQuality } = await import("../../../lib/rag/retriever.js");
+
+  // 1. Technical Audit (CSP + Graph)
+  const technicalAudit = analyzeLayoutQuality(layout, params);
+
+  // 2. AI Belief Critic
   const beliefCtx = buildBeliefContext(params.belief || "vastu");
-  const raw = await callClaude(
+  const { text: raw } = await callAI(
     `You are a strict ${beliefCtx.label} expert. Respond ONLY as valid JSON with no markdown.`,
     buildBeliefCriticPrompt(svgCode, layout.rooms, params.plotW, params.plotH, params.belief || "vastu"),
-    1800
+    2000
   );
+
   const parsed = parseJSON(raw);
-  if (!parsed) {
-    // Fall back to local scoring
-    const local = scoreVastuLayout(layout.rooms);
-    return { ...state, vastuReport: local };
-  }
-  const remedies = getVastuRemedies(parsed.violations || []);
-  return { ...state, vastuReport: { ...parsed, remedies } };
+  const vastuReport = parsed || scoreVastuLayout(layout.rooms);
+  const remedies = getVastuRemedies(vastuReport.violations || []);
+
+  return {
+    ...state,
+    vastuReport: {
+      ...vastuReport,
+      remedies,
+      technicalScore: technicalAudit.compositeScore,
+      technicalAudit: {
+        cspScore: technicalAudit.cspScore,
+        adjScore: technicalAudit.adjScore,
+        violations: [...technicalAudit.cspViolations, ...technicalAudit.adjViolations]
+      }
+    }
+  };
 }
 
 // Node: build refinement hint from violations
 async function nodeRefine(state) {
-  const { vastuReport, ragContext } = state;
-  const refinementHint = buildRefinementHint(vastuReport, ragContext);
+  const { vastuReport, ragContext, layout, params } = state;
+  
+  // Make the hint more aggressive and structured to force changes
+  let refinementHint = buildRefinementHint(vastuReport, ragContext, layout, params);
+  
+  if (vastuReport?.violations?.length) {
+    refinementHint = `CRITICAL ARCHITECTURAL REVISION REQUIRED:\n${refinementHint}\n\n` + 
+                     `IMPORTANT: You MUST move the rooms specified above. Do NOT return the same SVG as before.\n` +
+                     `Current violations count: ${vastuReport.violations.length}. Target count: 0.`;
+  }
+
   return { ...state, refinementHint, iteration: state.iteration + 1 };
 }
+
+
 
 // ─── Main LangGraph workflow ──────────────────────────────────────────────────
 async function runRefinementWorkflow(initialState) {

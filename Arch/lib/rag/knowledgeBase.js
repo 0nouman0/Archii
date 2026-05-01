@@ -189,6 +189,117 @@ Room zones: Living→N, Kitchen→SE, Master Bed→SW, Bedroom 2→W, Bedroom 3�
 Key vastu features: Family Room in center zone (Brahmasthan) — this is the gathering heart of home. Multiple service rooms in NW column. Puja in NE. Kitchen in SE. Master Bed in SW. 5 bedrooms distributed in W, N, E zones.
 Staircase: SW zone, steps rise from East to West, 14 steps, labeled "UP" with step count.`,
   },
+
+  // ── South-facing layouts (new — ChatHouseDiffusion + DeepFloorplan inspired) ─
+  {
+    layoutId: "30x40_3BHK_South",
+    dimension: "30x40", bhk: 3, facing: "South", score: 85,
+    description: `30x40ft 3BHK South-facing vastu floor plan. Score: 85/100.
+Room zones: Living->SE, Kitchen->SE, Master Bed->SW, Bedroom 2->W, Bedroom 3->N, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->E, Master Bath->S, Corridor->C.
+Key vastu: South-facing keeps South wall heavy. Entrance in SE portion of South wall ONLY (never SW). Living in SE. Kitchen SE fire zone. Master Bed SW (critical). Puja NE. Service NW. Bedroom 3 North. Corridor center Brahmasthan.
+Entrance CRITICAL: NEVER place entrance in SW portion of South wall. Use SE quadrant only.
+Door placements: Entrance South wall East half (SE). Master Bed door opens North. Kitchen faces corridor. Puja opens East.
+Window placements: Living-South+East. Kitchen-East(mandatory). Puja-East. Master Bed SW-West+South. Bedroom 2 W-West+North. Bedroom 3 N-North+East. No large South windows except Living.`,
+  },
+  {
+    layoutId: "20x40_2BHK_South",
+    dimension: "20x40", bhk: 2, facing: "South", score: 83,
+    description: `20x40ft 2BHK South-facing vastu floor plan. Score: 83/100.
+Room zones: Living->SE, Kitchen->SE, Master Bed->SW, Bedroom 2->W, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->E, Corridor->C.
+South-facing compact. Entrance South wall SE quadrant only. Keep North heavy with bedrooms and Puja. South wall solid.
+Door placements: Entrance South wall East half. Bedrooms to central corridor.
+Window placements: Living-SE. Kitchen-East. Puja-East. Bathrooms-North.`,
+  },
+  {
+    layoutId: "40x50_4BHK_South",
+    dimension: "40x50", bhk: 4, facing: "South", score: 84,
+    description: `40x50ft 4BHK South-facing vastu floor plan. Score: 84/100.
+Room zones: Living->SE, Kitchen->SE, Master Bed->SW, Bedroom 2->W, Bedroom 3->N, Bedroom 4->E, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->E, Family Room->C, Corridor->C.
+Large South-facing. Entrance SE portion of South wall. Family Room center. South wall heavy and solid. No balcony on South side.
+Door placements: Entrance SE of South wall. Master Bed door North. Bedroom doors face corridor.
+Window placements: No large South windows. East for Kitchen/Puja. North for Bedroom 3. West for Bedroom 2.`,
+  },
+  {
+    layoutId: "25x50_3BHK_South",
+    dimension: "25x50", bhk: 3, facing: "South", score: 81,
+    description: `25x50ft 3BHK South-facing narrow-deep vastu floor plan. Score: 81/100.
+Room zones: Bedroom 3->N, Kitchen->SE, Master Bed->SW, Bedroom 2->W, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->E, Living->SE, Corridor->C.
+Narrow South-facing. South wall heavy. Entrance South wall SE quadrant ONLY - never SW. Compound wall taller on South.
+Window placements: No South-facing windows. East for Kitchen/Puja. North for Bedroom 3. West for Bedroom 2.`,
+  },
+
+  // ── West-facing layouts ──────────────────────────────────────────────
+  {
+    layoutId: "30x40_3BHK_West",
+    dimension: "30x40", bhk: 3, facing: "West", score: 87,
+    description: `30x40ft 3BHK West-facing vastu floor plan. Score: 87/100.
+Room zones: Living->W, Kitchen->SE, Master Bed->SW, Bedroom 2->N, Bedroom 3->E, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->S, Master Bath->S, Corridor->C.
+West-facing acceptable per Vastu. Entrance West wall NW half (never SW). Living West wing evening light. Service NW. Kitchen SE. Master Bed SW. Puja NE.
+Entrance: West wall entrance in NW half ONLY. Never SW half of West wall.
+Door placements: Entrance West wall North half (NW). Living opens West. Bedrooms to central corridor.
+Window placements: Living-West(large)+North. Kitchen-East(mandatory). Puja-East/North. Master Bed SW-South+West. Bedroom 2 N-North+East. Bedroom 3 E-East+North.`,
+  },
+  {
+    layoutId: "25x50_3BHK_West",
+    dimension: "25x50", bhk: 3, facing: "West", score: 86,
+    description: `25x50ft 3BHK West-facing narrow-deep plot vastu floor plan. Score: 86/100.
+Room zones: Living->W, Kitchen->SE, Master Bed->SW, Bedroom 2->N, Bedroom 3->N, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->S, Corridor->C.
+Narrow West-facing. Living West (entrance). Service NW. Two bedrooms North. Kitchen SE. Master Bed SW. Puja NE. Corridor center.
+Window placements: Living-West. Kitchen-East. Puja-North+East. Bedrooms-North. No South windows.`,
+  },
+  {
+    layoutId: "40x60_4BHK_West",
+    dimension: "40x60", bhk: 4, facing: "West", score: 85,
+    description: `40x60ft 4BHK West-facing vastu floor plan. Score: 85/100.
+Room zones: Living->W, Kitchen->SE, Master Bed->SW, Bedroom 2->N, Bedroom 3->N, Bedroom 4->E, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->S, Family Room->C, Corridor->C.
+Large West-facing. Family Room center. Living West. Bedrooms N, E, NW. Kitchen SE. Master Bed SW. Service NW. Puja NE.
+Window placements: Living-West(large). Kitchen-East(mandatory). Puja-East/North. All bedrooms-North or East. No South windows.`,
+  },
+  {
+    layoutId: "20x40_2BHK_West",
+    dimension: "20x40", bhk: 2, facing: "West", score: 83,
+    description: `20x40ft 2BHK West-facing compact vastu floor plan. Score: 83/100.
+Room zones: Living->W, Kitchen->SE, Master Bed->SW, Bedroom 2->N, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->S, Corridor->C.
+Compact West-facing. Entrance West wall NW. Living West (front). Puja NE. Kitchen SE. Master Bed SW. Service NW. Bedroom 2 North.
+Window placements: Living-West. Kitchen-East. Puja-East+North. Bedroom 2-North. No South windows.`,
+  },
+
+  // ── Large plots and additional East/North facing ─────────────────────────
+  {
+    layoutId: "40x50_4BHK_East",
+    dimension: "40x50", bhk: 4, facing: "East", score: 92,
+    description: `40x50ft 4BHK East-facing vastu floor plan. Score: 92/100.
+Room zones: Bedroom 4->N, Living->E, Kitchen->SE, Master Bed->SW, Bedroom 2->W, Bedroom 3->N, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->S, Family Room->C, Corridor->C.
+East-facing most auspicious. Entrance East wall North half. Living East receives morning sun. Puja NE first sunlight. Family Room center.
+Window placements: Living-East(large). Puja-East. Kitchen-East. Bedrooms-North+East. Master Bed-South.`,
+  },
+  {
+    layoutId: "60x90_5BHK_North",
+    dimension: "60x90", bhk: 5, facing: "North", score: 90,
+    description: `60x90ft 5BHK North-facing bungalow vastu floor plan. Score: 90/100.
+Room zones: Living->N, Kitchen->SE, Master Bed->SW, Bedroom 2->W, Bedroom 3->W, Bedroom 4->E, Bedroom 5->N, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->S, Study->NE, Family Room->C, Balcony->NE, Corridor->C.
+Large bungalow. Study in NE (knowledge zone - excellent for scholars). Balcony NE facing East. Master Bed SW with private garden.
+Adjacency: Kitchen-Dining MUST adjacent. Puja+Study both NE knowledge zone. Master Bed+Master Bath MUST.
+Window placements: Living-North+East. Puja-East. Study-East(morning light for concentration). Kitchen-East. Bedrooms-North+East.`,
+  },
+  {
+    layoutId: "50x60_4BHK_North_2Storey",
+    dimension: "50x60", bhk: 4, facing: "North", score: 92,
+    description: `50x60ft 4BHK North-facing 2-storey vastu floor plan. Score: 92/100.
+Room zones: Living->N, Kitchen->SE, Master Bed->SW, Bedroom 2->W, Bedroom 3->W, Bedroom 4->E, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->S, Study->E, Staircase->SW, Corridor->C.
+Two-storey home. Staircase in SW (vastu compliant). Study East zone (morning light and concentration). Bedrooms in W and E. Kitchen SE. Master Bed SW. Puja NE.
+Staircase: SW zone. 14 steps rise East to West. Landing South side. Labeled UP with step count.
+Window placements: Study-large East window. Living-North. Kitchen-East. Puja-East/North.`,
+  },
+  {
+    layoutId: "25x40_2BHK_North_Compact",
+    dimension: "25x40", bhk: 2, facing: "North", score: 91,
+    description: `25x40ft 2BHK North-facing compact plot vastu floor plan. Score: 91/100.
+Room zones: Living->N, Kitchen->SE, Master Bed->SW, Bedroom 2->W, Bathroom->NW, Toilet->NW, Utility->NW, Puja->NE, Dining->S, Corridor->C.
+Compact North-facing. Living spans North. Puja NE. Service NW. Kitchen SE. Master Bed SW. Bedroom 2 West. Corridor center (Brahmasthan).
+Key vastu: All critical zones maintained even on compact 25x40ft plot. No compromise on Master Bed SW or Puja NE placement.
+Window placements: Living-North(large). Kitchen-East. Puja-East. Master Bed-South. Bedroom 2-West.`,
+  },
 ];
 
 // ─── Door placement rules ──────────────────────────────────────────────────────
@@ -258,6 +369,56 @@ export function getMaxFloors(params) {
   };
 }
 
+
+// ─── Extended Room Type Vocabulary (from zlzeng/DeepFloorplan) ─────────────────
+// 30+ room types recognised by deep learning floor plan models
+export const ROOM_TYPE_VOCABULARY = [
+  // Core habitable
+  "Living", "Dining", "Kitchen", "Master Bed", "Bedroom 2", "Bedroom 3", "Bedroom 4", "Bedroom 5",
+  // Prayer / spiritual
+  "Puja", "Prayer Room", "Meditation Room", "Pooja Hall",
+  // Service / utility
+  "Bathroom", "Master Bath", "Toilet", "Utility", "Laundry", "Store",
+  // Circulation
+  "Corridor", "Staircase", "Foyer", "Passage", "Lobby", "Entrance Hall",
+  // Outdoor-connected
+  "Balcony", "Terrace", "Car Porch", "Verandah", "Garden Room",
+  // Work / study
+  "Study", "Home Office", "Library", "Reading Room",
+  // Large / social
+  "Family Room", "Entertainment Room", "Game Room",
+  // Service staff
+  "Servant Quarter", "Driver Room",
+  // Architectural
+  "Basement", "Loft", "Mezzanine",
+];
+
+// ─── Spatial Relationship Rules (from ChatHouseDiffusion structured schema) ────
+// ChatHouseDiffusion encodes floor plans as: roomA [spatial_relation] roomB
+export const MANDATORY_SPATIAL_RULES = [
+  { from:"Kitchen",    relation:"adjacent",  to:"Dining",      priority:"MUST",   reason:"Direct food service flow" },
+  { from:"Master Bed", relation:"connected", to:"Master Bath",  priority:"MUST",   reason:"Ensuite access without leaving bedroom" },
+  { from:"Living",     relation:"connected", to:"Corridor",    priority:"MUST",   reason:"Main social space opens to circulation" },
+  { from:"Kitchen",    relation:"separated", to:"Puja",         priority:"MUST",   reason:"Fire zone cannot touch sacred space" },
+  { from:"Toilet",     relation:"separated", to:"Kitchen",      priority:"MUST",   reason:"Hygiene separation — NBC code" },
+  { from:"Puja",       relation:"separated", to:"Bathroom",     priority:"MUST",   reason:"Sacred space cannot be near wet rooms" },
+  { from:"Puja",       relation:"corner",    to:"NE",           priority:"MUST",   reason:"NE is Ishanya — only acceptable Puja position" },
+  { from:"Master Bed", relation:"corner",    to:"SW",           priority:"MUST",   reason:"SW heaviest zone — ideal for Master Bed" },
+  { from:"Kitchen",    relation:"cluster",   to:"Utility",      priority:"SHOULD", reason:"Service cluster for plumbing efficiency" },
+  { from:"Bathroom",   relation:"cluster",   to:"Toilet",       priority:"SHOULD", reason:"Wet rooms cluster in NW for plumbing" },
+  { from:"Study",      relation:"adjacent",  to:"Living",       priority:"SHOULD", reason:"Study accessible from main living area" },
+  { from:"Balcony",    relation:"connected", to:"Living",       priority:"SHOULD", reason:"Balcony extends living space outward" },
+  { from:"Staircase",  relation:"adjacent",  to:"Corridor",     priority:"MUST",   reason:"Staircase always connects to main corridor" },
+];
+
+export function formatSpatialRulesContext() {
+  const must   = MANDATORY_SPATIAL_RULES.filter(r => r.priority === "MUST");
+  const should = MANDATORY_SPATIAL_RULES.filter(r => r.priority === "SHOULD");
+  const mustStr   = must.map(r => `  • ${r.from} MUST be ${r.relation}${r.to ? " to " + r.to : ""}: ${r.reason}`).join("\n");
+  const shouldStr = should.map(r => `  • ${r.from} SHOULD be ${r.relation}${r.to ? " to " + r.to : ""}: ${r.reason}`).join("\n");
+  return `MANDATORY SPATIAL RELATIONSHIPS:\n${mustStr}\n\nRECOMMENDED SPATIAL RELATIONSHIPS:\n${shouldStr}`;
+}
+
 // ─── Build a rich text document for a retrieval query ─────────────────────────
 export function buildQueryDocument(params) {
   const { plotW, plotH, bhk, facing, belief = 'vastu', city } = params;
@@ -277,6 +438,7 @@ export function formatRAGContext(retrievedDocs, params) {
     .map((doc, i) => `Example ${i + 1} (score ${doc.score || '~90'}/100):\n${doc.content || doc.description}`)
     .join("\n\n");
 
+  const spatialRulesCtx = typeof formatSpatialRulesContext === "function" ? formatSpatialRulesContext() : "";
   return `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ## RAG CONTEXT — VASTU-COMPLIANT REFERENCE LAYOUTS
@@ -293,9 +455,13 @@ ${WINDOW_RULES}
 
 ${STAIRCASE_RULES}
 
+SPATIAL RELATIONSHIP RULES (from ChatHouseDiffusion schema):
+${spatialRulesCtx}
+
 HIGH-SCORING REFERENCE EXAMPLES:
 ${examples}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Apply the zone map and door/window rules STRICTLY. The reference examples show what a 90+ scoring plan looks like.
+Apply the zone map, door/window rules, and spatial relationships STRICTLY. The reference examples show what a 90+ scoring plan looks like for ${facing}-facing ${bhk}BHK.
+${facing === "South" ? "\n⚠️ SOUTH-FACING: Entrance ONLY in SE portion of South wall. Keep South wall heavy. No large South windows." : facing === "West" ? "\n⚠️ WEST-FACING: Entrance in NW half of West wall ONLY. Keep North/East sides lighter." : ""}
 `;
 }
